@@ -62,6 +62,8 @@
 - `docs/VERSIONING.md`: versioning policy
 - `scripts/generate_requirements_docx.ps1`: requirements document generator
 - `scripts/generate_detailed_design_docx.ps1`: detailed design generator
+- When creating or updating `.docx` files programmatically, use an extract/edit/repack flow for the OpenXML container (`.docx` is a ZIP package) instead of in-place ZIP entry replacement on this host.
+- Programmatic `.docx` generation must write valid OpenXML package entry names with forward slashes such as `_rels/.rels` and `word/document.xml`, and must emit valid XML text without doubled quote escaping inside the stored XML files.
 - `scripts/play_wait_sound.ps1`: one-shot WAV playback helper
 - `scripts/start_wait_sound.ps1`: immediate and repeating wait-sound worker starter
 - `scripts/stop_wait_sound.ps1`: wait-sound worker stop helper
@@ -72,5 +74,4 @@
 
 - The current client project uses `COM9` for flashing and runtime interaction. The simulator must not try to own the same physical port at the same time as flashing or client-side serial tools.
 - If both sides need to run on one PC simultaneously, use a virtual COM pair or a separate serial bridge path.
-
 
