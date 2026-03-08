@@ -92,7 +92,7 @@ $documentXml = @"
 <w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14">
   <w:body>
     <w:p><w:r><w:t>Eyal Espresso Server Simulator Detailed Design</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Project Version Reference: 0.1.0</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Project Version Reference: 0.1.1</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>1. Software Architecture</w:t></w:r></w:p>
     <w:p><w:r><w:t>Implementation Language: the simulator application codebase is currently Python-only.</w:t></w:r></w:p>
@@ -113,6 +113,10 @@ $documentXml = @"
     <w:p><w:r><w:t>4. Environment and Compilation Method</w:t></w:r></w:p>
     <w:p><w:r><w:t>Runtime Stack: Python, FastAPI, pyserial, and uvicorn.</w:t></w:r></w:p>
     <w:p><w:r><w:t>Execution Model: the simulator runs as a Python backend service from the repository root, with tests and helper scripts kept alongside the application code.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Local Environment Setup: create a local virtual environment with `python -m venv .venv` and install dependencies with `.\.venv\Scripts\python.exe -m pip install -r requirements.txt pytest`.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Local Run Command: start the simulator from the repository root with `./scripts/run_simulator.ps1`.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Live Reload Command: use `./scripts/run_simulator.ps1 -Reload` during active UI and backend development.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Default Access URL: after startup, open `http://127.0.0.1:8000` in a browser to use the simulator UI.</w:t></w:r></w:p>
     <w:sectPr>
       <w:pgSz w:w="12240" w:h="15840"/>
       <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>
@@ -137,6 +141,7 @@ New-DocxPackage -OutputDocx $OutputDocx -Parts @{
 
 Remove-Item $TempDir -Recurse -Force
 Get-Item $OutputDocx | Select-Object FullName, Length
+
 
 
 
