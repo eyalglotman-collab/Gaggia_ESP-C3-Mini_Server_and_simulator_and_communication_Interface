@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eyal Espresso Backend Simulator</title>
+  <style>
+    :root { --line: rgba(95,214,255,.24); --text:#e7fbff; --muted:#8eb6c5; --accent:#4ff6ff; --accent2:#56a4ff; --warn:#ffb46a; --ok:#6effb4; --danger:#ff7b97; --shadow:0 24px 80px rgba(0,0,0,.45); --radius:24px; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:Bahnschrift,"Segoe UI Variable Display","Segoe UI",sans-serif; color:var(--text); background:radial-gradient(circle at top left, rgba(86,164,255,.18), transparent 35%),radial-gradient(circle at top right, rgba(79,246,255,.12), transparent 28%),linear-gradient(180deg,#07111b 0%,#04090e 100%); overflow-x:hidden; }
+    body::before { content:""; position:fixed; inset:0; background-image:linear-gradient(rgba(79,246,255,.05) 1px, transparent 1px),linear-gradient(90deg, rgba(79,246,255,.05) 1px, transparent 1px); background-size:34px 34px; mask-image:radial-gradient(circle at center, black 42%, transparent 85%); pointer-events:none; }
+    .shell { width:min(1280px, calc(100vw - 32px)); margin:24px auto; padding:28px; border:1px solid var(--line); border-radius:28px; background:rgba(5,16,26,.72); box-shadow:var(--shadow); backdrop-filter:blur(18px); }
+    .hero,.dashboard { display:grid; gap:22px; }
+    .hero { grid-template-columns:1.3fr .7fr; }
+    .dashboard { grid-template-columns:.9fr 1.1fr; margin-top:22px; }
+    .panel { border:1px solid var(--line); border-radius:var(--radius); background:linear-gradient(180deg, rgba(8,26,42,.92), rgba(6,19,31,.88)); padding:22px; position:relative; overflow:hidden; }
+    .panel::after { content:""; position:absolute; inset:0; border-radius:inherit; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), inset 0 0 38px rgba(79,246,255,.04); pointer-events:none; }
+    .title { margin:0; font-size:clamp(2rem, 4vw, 3.35rem); line-height:.96; letter-spacing:.08em; text-transform:uppercase; font-weight:700; text-shadow:0 0 18px rgba(79,246,255,.18); }
+    .panel-title { margin:0; font-size:1.15rem; letter-spacing:.08em; text-transform:uppercase; }
+    .label { display:inline-block; margin-bottom:8px; color:var(--muted); letter-spacing:.18em; text-transform:uppercase; font-size:.78rem; }
+    .subtitle,.panel-note { margin:14px 0 0; color:var(--muted); font-size:1rem; line-height:1.6; max-width:68ch; }
+    .connect-row { display:grid; grid-template-columns:1fr auto; gap:14px; align-items:end; margin-top:18px; }
+    .field-wrap { display:flex; flex-direction:column; gap:8px; }
+    input[type=text] { width:100%; height:56px; padding:0 18px; border-radius:16px; border:1px solid rgba(86,164,255,.28); background:rgba(3,12,19,.92); color:var(--text); font-size:1rem; outline:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02); }
+    input[type=text]:focus { border-color:var(--accent); box-shadow:0 0 0 4px rgba(79,246,255,.08),0 0 22px rgba(79,246,255,.12); }
+    .button-row,.state-console,.status-ribbon { display:flex; flex-wrap:wrap; gap:10px; }
+    .button-row,.status-ribbon,.state-console { margin-top:18px; }
+    .btn { min-height:44px; border:0; border-radius:16px; padding:0 18px; color:#041118; font-weight:700; font-size:.95rem; letter-spacing:.12em; text-transform:uppercase; background:linear-gradient(135deg, var(--accent), var(--accent2)); cursor:pointer; transition:transform 120ms ease, box-shadow 120ms ease; box-shadow:0 12px 28px rgba(79,246,255,.22); }
+    .btn:hover { transform:translateY(-1px); box-shadow:0 18px 36px rgba(79,246,255,.28); }
+    .btn.secondary { color:var(--text); background:rgba(8,28,43,.84); border:1px solid rgba(86,164,255,.28); box-shadow:none; }
+    .btn.secondary.active { border-color:var(--accent); color:var(--accent); box-shadow:inset 0 0 18px rgba(79,246,255,.08),0 0 20px rgba(79,246,255,.1); }
+    .btn.warn { color:#281304; background:linear-gradient(135deg,#ffcf77,#ff925a); }
+    .state-chip { padding:10px 14px; border-radius:999px; border:1px solid rgba(86,164,255,.2); color:var(--muted); background:rgba(7,20,33,.72); letter-spacing:.08em; text-transform:uppercase; font-size:.76rem; }
+    .state-chip.active { color:var(--text); background:linear-gradient(135deg, rgba(79,246,255,.18), rgba(86,164,255,.14)); border-color:rgba(79,246,255,.55); box-shadow:0 0 24px rgba(79,246,255,.12); }
+    .important-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; margin-top:16px; }
+    .datum { border-radius:18px; padding:14px; background:rgba(8,27,42,.8); border:1px solid rgba(86,164,255,.18); }
+    .datum-key { color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.12em; }
+    .datum-value { margin-top:8px; font-size:1rem; font-weight:600; color:var(--text); word-break:break-word; }
+    .log-window { height:560px; padding:18px; border-radius:18px; background:radial-gradient(circle at top, rgba(79,246,255,.08), transparent 25%), rgba(2,9,15,.96); border:1px solid rgba(79,246,255,.18); overflow:auto; font-family:Consolas,"Cascadia Mono",monospace; font-size:.9rem; line-height:1.55; color:#c9f6ff; white-space:pre-wrap; }
+    .flash { margin-top:14px; min-height:24px; color:var(--warn); font-size:.92rem; }
+    @media (max-width:980px) { .hero,.dashboard,.connect-row { grid-template-columns:1fr; } .important-grid { grid-template-columns:1fr; } .log-window { height:380px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <section class="panel">
+        <span class="label">Backend Simulator</span>
+        <h1 class="title">Dark Link Console</h1>
+        <p class="subtitle">A dark hi-tech operator surface for the espresso backend simulator. Connect to the client, drive the first workflow states, and watch transport and telemetry data update live.</p>
+        <div class="connect-row">
+          <label class="field-wrap"><span class="label">Client IP Address</span><input id="clientIpAddress" type="text" placeholder="192.168.1.50" autocomplete="off"></label>
+          <button id="connectButton" class="btn" type="button">Connect</button>
+        </div>
+        <div class="button-row">
+          <button id="initializeButton" class="btn secondary" type="button">Initialize Machine</button>
+          <button id="brewButton" class="btn" type="button">Start Brew</button>
+          <button id="idleButton" class="btn secondary" type="button">Return Idle</button>
+          <button id="resetButton" class="btn warn" type="button">Reset LoadSim</button>
+        </div>
+        <div class="status-ribbon" id="stateRibbon"></div>
+        <div class="flash" id="flashMessage"></div>
+      </section>
+      <section class="panel">
+        <span class="label">State Machine</span>
+        <h2 class="panel-title">LoadSim � Connect2Client � InitializeMachine � Brew � Idle</h2>
+        <p class="panel-note">The workflow buttons cover the core path while the state console remains available for direct inspection and debugging of each main state.</p>
+        <div class="state-console" id="stateConsole"></div>
+      </section>
+    </section>
+    <section class="dashboard">
+      <section class="panel">
+        <span class="label">Important Data</span>
+        <h2 class="panel-title">Runtime Snapshot</h2>
+        <div id="importantData" class="important-grid"></div>
+      </section>
+      <section class="panel">
+        <span class="label">Logger Output</span>
+        <h2 class="panel-title">Console Window</h2>
+        <p class="panel-note">Recent simulator log messages, transport activity, and important machine events appear here.</p>
+        <div id="logWindow" class="log-window">Loading simulator output...</div>
+      </section>
+    </section>
+  </main>
+  <script>
+    const elements = {
+      clientIpAddress: document.getElementById('clientIpAddress'), connectButton: document.getElementById('connectButton'), initializeButton: document.getElementById('initializeButton'), brewButton: document.getElementById('brewButton'), idleButton: document.getElementById('idleButton'), resetButton: document.getElementById('resetButton'), flashMessage: document.getElementById('flashMessage'), stateRibbon: document.getElementById('stateRibbon'), importantData: document.getElementById('importantData'), stateConsole: document.getElementById('stateConsole'), logWindow: document.getElementById('logWindow')
+    };
+    async function callJson(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Request failed.'); return payload; }
+    async function fetchSnapshot() { return callJson('/api/simulator'); }
+    function renderStateRibbon(snapshot) { elements.stateRibbon.innerHTML = ''; snapshot.available_states.forEach((state) => { const chip = document.createElement('div'); chip.className = 'state-chip' + (snapshot.current_state === state ? ' active' : ''); chip.textContent = state; elements.stateRibbon.appendChild(chip); }); }
+    function renderImportantData(snapshot) { elements.importantData.innerHTML = ''; Object.entries(snapshot.important_data).forEach(([key, value]) => { const card = document.createElement('div'); card.className = 'datum'; card.innerHTML = `<div class="datum-key">${key}</div><div class="datum-value">${value}</div>`; elements.importantData.appendChild(card); }); }
+    function renderStateConsole(snapshot) { elements.stateConsole.innerHTML = ''; snapshot.available_states.forEach((state) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'btn secondary' + (snapshot.current_state === state ? ' active' : ''); button.textContent = state; button.addEventListener('click', async () => { try { const payload = await callJson('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) }); renderSnapshot(payload); setFlash(`State changed to ${state}.`, false); } catch (error) { setFlash(error.message, true); } }); elements.stateConsole.appendChild(button); }); }
+    function renderLogs(snapshot) { elements.logWindow.textContent = snapshot.logs.length ? snapshot.logs.join('\n') : 'No simulator log lines yet.'; elements.logWindow.scrollTop = elements.logWindow.scrollHeight; }
+    function renderSnapshot(snapshot) { if (!elements.clientIpAddress.value && snapshot.client_ip_address) elements.clientIpAddress.value = snapshot.client_ip_address; renderStateRibbon(snapshot); renderImportantData(snapshot); renderStateConsole(snapshot); renderLogs(snapshot); }
+    function setFlash(message, isError) { elements.flashMessage.textContent = message; elements.flashMessage.style.color = isError ? 'var(--danger)' : 'var(--ok)'; }
+    async function connectToClient() { try { const payload = await callJson('/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_ip_address: elements.clientIpAddress.value.trim() }) }); renderSnapshot(payload); setFlash(`Connected simulator to client ${payload.client_ip_address}.`, false); } catch (error) { setFlash(error.message, true); } }
+    async function initializeMachine() { try { const payload = await callJson('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'InitializeMachine' }) }); renderSnapshot(payload); setFlash('Machine moved to InitializeMachine.', false); } catch (error) { setFlash(error.message, true); } }
+    async function startBrew() { try { const payload = await callJson('/api/brew/start', { method: 'POST' }); renderSnapshot(payload); setFlash('Brew session started.', false); } catch (error) { setFlash(error.message, true); } }
+    async function stopBrew() { try { const payload = await callJson('/api/brew/stop', { method: 'POST' }); renderSnapshot(payload); setFlash('Simulator returned to Idle.', false); } catch (error) { setFlash(error.message, true); } }
+    async function resetLoadSim() { try { const payload = await callJson('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'LoadSim' }) }); renderSnapshot(payload); setFlash('Simulator reset to LoadSim.', false); } catch (error) { setFlash(error.message, true); } }
+    async function refreshSnapshot() { try { renderSnapshot(await fetchSnapshot()); } catch (error) { setFlash(error.message, true); } }
+    elements.connectButton.addEventListener('click', connectToClient); elements.initializeButton.addEventListener('click', initializeMachine); elements.brewButton.addEventListener('click', startBrew); elements.idleButton.addEventListener('click', stopBrew); elements.resetButton.addEventListener('click', resetLoadSim); elements.clientIpAddress.addEventListener('keydown', (event) => { if (event.key === 'Enter') connectToClient(); });
+    refreshSnapshot(); setInterval(refreshSnapshot, 1000);
+  </script>
+</body>
+</html>

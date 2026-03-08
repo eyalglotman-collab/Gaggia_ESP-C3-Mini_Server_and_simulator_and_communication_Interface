@@ -2,3 +2,4 @@ fastapi
 uvicorn[standard]
 pyserial
 pydantic
+httpx

@@ -95,18 +95,24 @@ $documentXml = @"
     <w:p><w:r><w:t>Project Version Reference: 0.1.0</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>1. Software Architecture</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Application Entry: FastAPI app entry point starts API routes and coordinates simulator services.</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Transport Layer: One serial manager owns the COM device and handles framing and TX or RX state.</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Simulation Layer: Controller state machine simulates machine state, responses, telemetry, and faults.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Implementation Language: the simulator application codebase is currently Python-only.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Application Entry: server/app.py is the FastAPI app entry point and coordinates API route registration plus simulator service startup.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>API Layer: server/api/routes.py exposes operator and test endpoints for machine commands, status, and telemetry views.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Transport Layer: server/transport/serial_link.py owns the serial COM device, framing, and TX/RX state so request handlers do not compete for the same port.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Simulation Layer: server/sim/controller_state.py simulates machine state, controller responses, telemetry, and fault behavior.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Package Layout: the runtime code is split under server/api, server/transport, and server/sim, with tests kept separately under tests.</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>2. Interface Design</w:t></w:r></w:p>
-    <w:p><w:r><w:t>FastAPI shall expose operator and test endpoints for machine commands and telemetry.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Primary Interface: FastAPI exposes REST endpoints for operator and test control of the simulated backend.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Transport Interface: a single background serial manager is responsible for all COM-port ownership and exchange with the ESP32 client side.</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>3. Configuration</w:t></w:r></w:p>
     <w:p><w:r><w:t>Versioning, protocol constants, and simulator defaults shall be kept under repository control.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Repository Documents: requirements, detailed design, revision history, and versioning notes are maintained under docs.</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>4. Environment and Compilation Method</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Recommended environment: Python, FastAPI, pyserial, uvicorn, and local tests executed from the repository root.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Runtime Stack: Python, FastAPI, pyserial, and uvicorn.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Execution Model: the simulator runs as a Python backend service from the repository root, with tests and helper scripts kept alongside the application code.</w:t></w:r></w:p>
     <w:sectPr>
       <w:pgSz w:w="12240" w:h="15840"/>
       <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>
@@ -131,5 +137,6 @@ New-DocxPackage -OutputDocx $OutputDocx -Parts @{
 
 Remove-Item $TempDir -Recurse -Force
 Get-Item $OutputDocx | Select-Object FullName, Length
+
 
 

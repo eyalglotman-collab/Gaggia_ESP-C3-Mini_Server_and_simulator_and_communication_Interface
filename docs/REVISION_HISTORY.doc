@@ -2,10 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.0\par
-- Summary: Initial simulator repository scaffold with FastAPI or serial architecture baseline, documentation templates, and versioning workflow.\par
+- Version: 0.1.1\par
+- Summary: Added the first dark hi-tech simulator operator UI, state workflow, synthetic transport and telemetry, local run helper, API tests, and repaired programmatic docx generation.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-08\b0\par
+- Version: 0.1.1\par
+- Summary: Added the first functional backend simulator workflow and release-quality local tooling.\par
+- Notes: Implemented FastAPI-served UI with client IP input, connect flow, brew and idle controls, live important-data cards, log console, synthetic transport state, synthetic brew telemetry, local run script, pytest API coverage, httpx test dependency, and repaired OpenXML docx generation plus detailed design content updates.\par
+- Resolved Defects:\par
+  - DOCX-20260308-1: Simulator requirements and detailed design docx files were corrupt because the generated OpenXML package used invalid entry names and malformed XML quoting.\par
+\par
 \b 2026-03-08\b0\par
 - Version: 0.1.0\par
 - Summary: Created the initial Eyal Espresso Server Simulator repository scaffold.\par
