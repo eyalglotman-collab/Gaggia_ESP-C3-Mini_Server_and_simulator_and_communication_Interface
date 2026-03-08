@@ -1,4 +1,4 @@
-﻿# Eyal Espresso Server Simulator
+# Eyal Espresso Server Simulator
 
 ## Session Release Notes
 
@@ -26,6 +26,13 @@
 - Maintain `docs/REVISION_HISTORY.doc` with sections grouped by `X.Y`, a short change summary per entry, and a continuously maintained latest-version feature list.
 - Every function declaration and definition must have a short header comment block with `@brief`, `@details`, parameters, and return value where applicable.
 - Every `README.md` change must be committed immediately.
+- Repositories must not share tracked files. If another repository needs the same asset, script, or document, duplicate it into that repository and maintain the copies separately.
+- When a successful local verification cycle completes, play the project celebration sound from `sounds\build-success-monkey-1p5x.wav`.
+- When waiting for Eyal to do anything required to continue, including replying to a prompt, answering a question, approving a request, or simply not sending a new instruction while Codex is otherwise idle, play the project wait sound from `sounds\WaitSound.wav`.
+- For any such waiting state, play `sounds\WaitSound.wav` once immediately when the wait begins, then if 3 minutes pass without a response from Eyal, play it again and keep repeating it every additional 3 minutes until a response arrives or the task resumes.
+- Session hook for the wait sound:
+  - immediately before sending a prompt, question, or approval request that requires Eyal to respond, run `scripts\start_wait_sound.ps1`
+  - immediately after Eyal responds, run `scripts\stop_wait_sound.ps1`
 - Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
 - This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.
@@ -55,8 +62,15 @@
 - `docs/VERSIONING.md`: versioning policy
 - `scripts/generate_requirements_docx.ps1`: requirements document generator
 - `scripts/generate_detailed_design_docx.ps1`: detailed design generator
+- `scripts/play_wait_sound.ps1`: one-shot WAV playback helper
+- `scripts/start_wait_sound.ps1`: immediate and repeating wait-sound worker starter
+- `scripts/stop_wait_sound.ps1`: wait-sound worker stop helper
+- `sounds/build-success-monkey-1p5x.wav`: local build-success sound asset
+- `sounds/WaitSound.wav`: local runtime wait-sound asset
 
 ## Initial Development Notes
 
 - The current client project uses `COM9` for flashing and runtime interaction. The simulator must not try to own the same physical port at the same time as flashing or client-side serial tools.
 - If both sides need to run on one PC simultaneously, use a virtual COM pair or a separate serial bridge path.
+
+
