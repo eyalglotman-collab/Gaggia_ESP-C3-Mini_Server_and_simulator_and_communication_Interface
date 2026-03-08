@@ -1,0 +1,21 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Consolas;}{\f1 Arial;}}
+\f1\fs24
+\b Latest Version Feature List\b0\par
+- Version: 0.1.0\par
+- Summary: Initial simulator repository scaffold with FastAPI or serial architecture baseline, documentation templates, and versioning workflow.\par
+\par
+\b X=0, Y=1\b0\par
+\b 2026-03-08\b0\par
+- Version: 0.1.0\par
+- Summary: Created the initial Eyal Espresso Server Simulator repository scaffold.\par
+- Notes: Added repo workflow files, requirements and detailed design document generators, docs structure, placeholder server modules, and git initialization.\par
+- Resolved Defects:\par
+  - None in this release.\par
+\par
+\i Entry template:\i0\par
+- Version: 0.1.Z\par
+- Date:\par
+- Summary:\par
+- Notes:\par
+}
