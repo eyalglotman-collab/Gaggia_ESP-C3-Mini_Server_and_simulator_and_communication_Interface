@@ -64,6 +64,11 @@
 - After a successful client build+flash or simulator verification cycle that is meant to be exercised through the simulator UI, Codex must automatically run the simulator UI and ask Eyal whether it loaded successfully.
 - Every version bump must add a new entry to docs/REVISION_HISTORY.doc that includes the new version number, a timestamp, and a brief description of what changed relative to the previous version.
 - Maintain `docs/REVISION_HISTORY.doc` with sections grouped by `X.Y`, a short change summary per entry, and a continuously maintained latest-version feature list.
+- Before informing Eyal to run a build, review the VS Code `PROBLEMS` panel and resolve all reported issues.
+- After every code change, Codex must perform local update/verification itself before reporting ready:
+  - refresh project metadata (`reconfigure` / `compile_commands.json`)
+  - run a local build
+  - fix all detected issues before asking Eyal to build
 - Every function declaration and definition must have a short header comment block with `@brief`, `@details`, parameters, and return value where applicable.
 - Every `README.md` change must be committed immediately.
 - Repositories must not share tracked files. If another repository needs the same asset, script, or document, duplicate it into that repository and maintain the copies separately.
@@ -81,6 +86,16 @@
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
 - This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.
 - For USB serial integration, one background serial manager shall own the COM port and the FastAPI routes shall communicate with that manager instead of opening the port directly from request handlers.
+
+### Codex and VS Code `PROBLEMS` (Session Rule)
+
+- Codex currently cannot directly read the live VS Code `PROBLEMS` UI panel state by itself in-session.
+- Therefore, Codex must use task/build output plus problem matchers as the machine-readable source of diagnostics.
+- Required workflow for every coding session:
+  - Run the local simulator build/verification commands.
+  - Verify zero active problems from task output and fix all issues before saying build-ready.
+  - If UI-only diagnostics still appear, Eyal should paste the `PROBLEMS` entries and Codex must resolve them before proceeding.
+- VS Code tasks should reveal problems on build failure and use problem matchers so diagnostics remain machine-readable.
 
 ## Recommended Architecture Baseline
 
