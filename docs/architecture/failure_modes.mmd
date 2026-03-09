@@ -3,8 +3,12 @@ flowchart TD
     HOST["Host watchdog failure"] --> ERR
     DEV["Device watchdog failure"] --> ERR
     USB["USB COM loss"] --> ERR
+    COMCFG["COM port not found"] --> ERR
     WIFI["Wi-Fi association failure"] --> ERR
+    WIFIOFF["Configured AP offline / not visible"] --> ERR
     TCP["TCP session loss"] --> ERR
+    TCPNF["TCP server not found / not listening"] --> ERR
+    GEN["Generic unknown transport failure"] --> ERR
     MAL["Malformed packet / bad version"] --> ERR
     DISC["Intentional disconnect"] --> RESET["reset state"]
 

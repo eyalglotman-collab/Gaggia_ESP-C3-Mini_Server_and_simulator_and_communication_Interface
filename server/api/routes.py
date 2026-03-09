@@ -16,9 +16,36 @@ class PortRequest(BaseModel):
     port_name: str = Field(..., min_length=1, max_length=64)
 
 
+class TransportConfigRequest(BaseModel):
+    serial_port: str = Field("COM4", min_length=1, max_length=64)
+    wifi_ssid: str = Field("EyalSimulatorAP", min_length=1, max_length=64)
+    wifi_password: str = Field("espresso1234", max_length=64)
+    server_ip: str = Field("192.168.4.1", min_length=1, max_length=64)
+    server_port: int = Field(3333, ge=1, le=65535)
+    wifi_connect_timeout_ms: int = Field(10000, ge=1, le=60000)
+    tcp_connect_timeout_ms: int = Field(3000, ge=1, le=60000)
+    keepalive_period_ms: int = Field(100, ge=1, le=5000)
+
+
 @router.get("/link")
 def get_link_snapshot() -> dict[str, object]:
     return asdict(link_runtime.get_snapshot())
+
+
+@router.post("/config")
+def update_transport_config(request: TransportConfigRequest) -> dict[str, object]:
+    return asdict(
+        link_runtime.configure_transport(
+            serial_port=request.serial_port,
+            wifi_ssid=request.wifi_ssid,
+            wifi_password=request.wifi_password,
+            server_ip=request.server_ip,
+            server_port=request.server_port,
+            wifi_connect_timeout_ms=request.wifi_connect_timeout_ms,
+            tcp_connect_timeout_ms=request.tcp_connect_timeout_ms,
+            keepalive_period_ms=request.keepalive_period_ms,
+        )
+    )
 
 
 @router.post("/transport/open")

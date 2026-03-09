@@ -6,13 +6,13 @@ flowchart TD
     end
 
     subgraph INITIALIZE["INITIALIZE"]
-        I1["Host sends INITIALIZE(role, endpoint, watchdog)"] --> I2["Bridge validates configuration"]
+        I1["Host sends INITIALIZE(serial port, ssid, password, server IP/port, watchdog)"] --> I2["Simulator validates mirrored Wi-Fi/TCP configuration"]
         I2 --> I3["Bridge prepares Wi-Fi/TCP resources"]
         I3 --> I4["Bridge returns INITIALIZE_ACK"]
     end
 
     subgraph CONNECT["CONNECT"]
-        C1["Host sends CONNECT"] --> C2["Bridge opens/accepts low-level session"]
+        C1["Host sends CONNECT(server endpoint reference)"] --> C2["Bridge enters Wi-Fi-ready state and attempts TCP session"]
         C2 --> C3["Bridge returns CONNECT_ACK"]
         C3 --> C4["Both sides enter 100 mSec keep-alive supervision"]
     end

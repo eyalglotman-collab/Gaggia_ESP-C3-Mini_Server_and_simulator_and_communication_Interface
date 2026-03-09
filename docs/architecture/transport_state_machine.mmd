@@ -1,8 +1,8 @@
 stateDiagram-v2
     [*] --> reset
     reset --> initialize: reset complete / self-test passed
-    initialize --> connect: configuration valid / transport prepared
-    initialize --> error: invalid config or bring-up failure
+    initialize --> connect: COM open / Wi-Fi config valid / transport prepared
+    initialize --> error: COM unavailable / invalid Wi-Fi-TCP config / bridge bring-up failure
     connect --> disconnect: intentional disconnect command
     connect --> error: CRC fault, timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
     disconnect --> reset: controlled shutdown complete
@@ -13,9 +13,11 @@ stateDiagram-v2
     state reset {
         [*] --> self_test
         self_test --> load_params
+        load_params --> mirror_defaults: COM4 + EyalSimulatorAP + 192.168.4.1:3333
     }
 
     state connect {
-        [*] --> link_establish
-        link_establish --> keepalive_supervision
+        [*] --> wifi_ready
+        wifi_ready --> tcp_session_wait
+        tcp_session_wait --> keepalive_supervision
     }

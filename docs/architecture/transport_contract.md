@@ -21,13 +21,26 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Watchdog enforcement | Low-level transport layer on both sides | Missing forward progress forces transition to `error`. |
 | Recovery decision | Supervisory host logic | Only explicit `reset` or `initialize` recovers from `error`. |
 
+## Mirrored Transport Configuration
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `serial_port` | `COM4` | USB serial endpoint from the PC host into the ESP32-C3 bridge. |
+| `wifi_ssid` | `EyalSimulatorAP` | Bridge-side Wi-Fi network identifier mirrored from the client contract. |
+| `wifi_password` | `espresso1234` | Bridge-side Wi-Fi credential mirrored from the client contract. |
+| `server_ip` | `192.168.4.1` | Default bridge-side/server endpoint address used during connect. |
+| `server_port` | `3333` | TCP endpoint used for the low-level transport session. |
+| `wifi_connect_timeout_ms` | `10000` | Bound on low-level Wi-Fi association/visibility preparation. |
+| `tcp_connect_timeout_ms` | `3000` | Bound on TCP session establishment after Wi-Fi is ready. |
+| `keepalive_period_ms` | `100` | Host-driven keep-alive cadence. |
+
 ## State Definitions
 
 | State | Purpose | Entry Actions | Exit Conditions |
 | --- | --- | --- | --- |
 | `reset` | Clear session state and run self-test. | Clear counters, buffers, stale link ownership, load parameters. | Self-test complete and parameters available. |
-| `initialize` | Prepare transport resources without claiming a healthy link. | Validate configuration, prepare parser, prepare Wi-Fi/TCP roles and timers. | Configuration valid and resources ready, or initialization fault occurs. |
-| `connect` | Establish and supervise the active low-level link. | Open/accept session, start keep-alive cadence, enforce CRC and sequencing. | Controlled disconnect or fault. |
+| `initialize` | Prepare transport resources without claiming a healthy link. | Validate mirrored COM/Wi-Fi/TCP configuration, prepare parser, and hand bridge settings to the ESP32-C3 transport controller. | Configuration valid and resources ready, or initialization fault occurs. |
+| `connect` | Establish and supervise the active low-level link. | Enter Wi-Fi-ready state, attempt the active TCP session, start keep-alive cadence, enforce CRC and sequencing. | Controlled disconnect or fault. |
 | `disconnect` | Perform controlled teardown. | Stop forwarding, close transport cleanly, preserve reason. | Teardown complete or teardown fault occurs. |
 | `error` | Latch low-level fault and block normal traffic. | Preserve error reason and last counters, stop forwarding payloads. | Explicit `reset` or `initialize` command only. |
 
@@ -36,7 +49,7 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Current State | Trigger | Guard / Condition | Action | Next State | Timeout / Failure Behavior |
 | --- | --- | --- | --- | --- | --- |
 | `reset` | Self-test complete | Parameters valid | Prepare initialization inputs | `initialize` | Self-test failure moves to `error`. |
-| `initialize` | Initialize command completed | Configuration valid | Arm transport resources | `connect` | Validation or bring-up failure moves to `error`. |
+| `initialize` | Initialize command completed | COM is available and mirrored Wi-Fi/TCP configuration is coherent | Arm bridge resources and hand off Wi-Fi/TCP settings | `connect` | Validation, COM availability, or bridge bring-up failure moves to `error`. |
 | `connect` | Disconnect command | Intentional shutdown requested | Controlled teardown | `disconnect` | Teardown failure moves to `error`. |
 | `connect` | Fault detected | CRC fault, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit recovery. |
 | `disconnect` | Teardown complete | Resources released | Return to clean baseline | `reset` | Incomplete teardown moves to `error`. |
@@ -48,8 +61,8 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Packet | Purpose | Sender | Receiver | Required Fields | Normal Response | Timeout Rule | Error Handling |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `RESET` | Force hard reset and self-test. | Supervisory host | Low-level peer | `protocol_version`, `message_type`, reset profile/parameters, CRC | `RESET_ACK` | Supervisor expects bounded response time from reset path. | Failure enters `error`. |
-| `INITIALIZE` | Prepare low-level resources. | Supervisory host | Low-level peer | endpoint/role parameters, watchdog settings, CRC | `INITIALIZE_ACK` | Initialization must complete before connect window expires. | Validation failure enters `error`. |
-| `CONNECT` | Enter active session. | Supervisory host | Low-level peer | connection role or endpoint reference, CRC | `CONNECT_ACK` | Session establishment timeout enters `error`. | Socket/join failure enters `error`. |
+| `INITIALIZE` | Prepare low-level resources. | Supervisory host | Low-level peer | serial port, Wi-Fi SSID/password, server IP/port, watchdog settings, CRC | `INITIALIZE_ACK` | Initialization must complete before connect window expires. | Validation failure enters `error`. |
+| `CONNECT` | Enter active session. | Supervisory host | Low-level peer | connection role or endpoint reference, CRC | `CONNECT_ACK` | Session establishment timeout enters `error`. | Wi-Fi/TCP socket failure enters `error`. |
 | `DISCONNECT` | Controlled teardown. | Supervisory host | Low-level peer | disconnect reason, CRC | `DISCONNECT_ACK` | Teardown must complete in bounded time. | Teardown failure enters `error`. |
 | `KEEPALIVE` | Prove host forward progress. | PC simulator host | Low-level peer | incremented `HostLiveInteger`, sequence, CRC | `KEEPALIVE_ACK` with `DeviceLiveInteger` and status | Every 100 mSec. | Missing progress enters `error`. |
 | `DATA` | Carry application payload after validation. | Either side | Peer | payload, sequence, CRC | `ACK` or application response | Normal transport timeout policy applies. | Invalid frame is rejected before upper layer sees payload. |
@@ -70,7 +83,20 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Host watchdog failure | ESP32-C3 transport controller | Assume host stalled and latch fault | `reset` or `initialize` after host recovers |
 | Device watchdog failure | PC simulator host | Stop trusting link and latch fault | `reset` |
 | USB COM loss | Host or bridge | Stop transport and latch fault | `reset` after COM recovery |
+| COM port not found | Simulator host open/initialize path | Latch explicit COM availability fault before bridge initialization continues | `reset` after COM recovery |
 | Wi-Fi association failure | Bridge-side initialize/connect | Latch fault with Wi-Fi status | `initialize` or `reset` |
+| Configured AP offline / not visible | Bridge-side initialize/connect or mirrored simulator validation | Latch explicit AP-not-visible fault before claiming Wi-Fi-ready state | `reset` after RF or configuration changes |
+| TCP server not found / not listening | Bridge-side connect | Latch explicit server/listener availability fault | `initialize`, corrected endpoint, or `reset` |
+| Generic unknown transport failure | Any stage without stronger evidence | Latch stage-specific fault and stop progressing state | `reset` or `initialize` |
 | TCP session loss | Bridge-side connect state | Latch fault and stop forwarding | `initialize` then `connect`, or `reset` |
 | Malformed packet / unsupported version | Parser | Reject packet and latch fault | `reset` after protocol correction |
 | Intentional disconnect | Supervisor | Controlled shutdown | `reset` then normal reconnect sequence |
+
+## Simulator Runtime Error Mapping
+
+| Condition | Simulator Error Text | Notes |
+| --- | --- | --- |
+| Serial port unavailable during open/initialize | `COM port not found` | The simulator host can diagnose this locally because it owns the COM port. |
+| Empty or unavailable mirrored Wi-Fi SSID | `Wi-Fi AP is offline` | Used when the bridge-side AP contract is invalid before initialize can continue. |
+| TCP endpoint invalid or bridge reports listener failure | `TCP server not found` | Reserved for bridge-side/server-listener availability faults. |
+| Stage fails without a stronger category | `generic unknown failure` | Fallback error for stage-specific failures without trustworthy root-cause evidence. |

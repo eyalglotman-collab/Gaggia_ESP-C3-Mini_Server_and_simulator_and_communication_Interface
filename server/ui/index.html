@@ -11,12 +11,13 @@
     .grid { display:grid; gap:18px; grid-template-columns:1.05fr .95fr; } .panel { border:1px solid var(--line); border-radius:20px; padding:20px; background:linear-gradient(180deg, rgba(10,24,38,.95), rgba(7,16,25,.94)); }
     .title { margin:0 0 10px; font-size:2.2rem; text-transform:uppercase; letter-spacing:.08em; } .note,.flash { color:var(--muted); } .label { display:block; margin-bottom:8px; font-size:.78rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); }
     .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; } input { width:220px; height:48px; border-radius:14px; border:1px solid rgba(96,202,255,.26); background:#03111c; color:var(--text); padding:0 14px; }
+    .config-grid { display:grid; gap:12px; grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:18px; }
     button { min-height:42px; border:0; border-radius:14px; padding:0 16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#06111a; background:linear-gradient(135deg, var(--accent), var(--accent2)); cursor:pointer; }
     button.secondary { color:var(--text); background:rgba(9,28,43,.88); border:1px solid rgba(96,202,255,.24); } button.warn { background:linear-gradient(135deg,#ffd08a,#ff9b68); color:#241103; }
     .states,.actions,.data-grid { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; } .chip { padding:10px 14px; border-radius:999px; border:1px solid rgba(96,202,255,.24); color:var(--muted); background:rgba(5,15,24,.8); text-transform:uppercase; font-size:.78rem; } .chip.active { color:var(--text); border-color:rgba(97,232,255,.55); box-shadow:0 0 18px rgba(97,232,255,.1); }
     .data-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .datum { border-radius:16px; border:1px solid rgba(96,202,255,.18); background:rgba(6,19,31,.86); padding:14px; } .datum .k { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.12em; } .datum .v { margin-top:8px; font-size:1rem; font-weight:600; word-break:break-word; }
     pre { margin:0; height:540px; overflow:auto; border-radius:16px; border:1px solid rgba(96,202,255,.18); background:#020a11; padding:16px; color:#c9f2ff; font-family:Consolas,"Cascadia Mono",monospace; font-size:.88rem; white-space:pre-wrap; }
-    @media (max-width: 980px) { .grid { grid-template-columns:1fr; } .data-grid { grid-template-columns:1fr; } pre { height:360px; } }
+    @media (max-width: 980px) { .grid { grid-template-columns:1fr; } .data-grid { grid-template-columns:1fr; } .config-grid { grid-template-columns:1fr; } pre { height:360px; } }
   </style>
 </head>
 <body>
@@ -29,6 +30,18 @@
         <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
         <button id="openButton" type="button">Open Port</button>
         <button id="closeButton" type="button" class="secondary">Close Port</button>
+      </div>
+      <div class="config-grid">
+        <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
+        <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
+        <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
+        <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
+        <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
+        <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
+        <button id="applyConfigButton" type="button">Apply Transport Config</button>
       </div>
       <div class="actions">
         <button id="resetButton" type="button" class="warn">Reset</button>
@@ -52,15 +65,16 @@
     </section>
   </main>
   <script>
-    const elements = { serialPort: document.getElementById('serialPort'), openButton: document.getElementById('openButton'), closeButton: document.getElementById('closeButton'), resetButton: document.getElementById('resetButton'), initializeButton: document.getElementById('initializeButton'), connectButton: document.getElementById('connectButton'), disconnectButton: document.getElementById('disconnectButton'), keepaliveButton: document.getElementById('keepaliveButton'), states: document.getElementById('states'), importantData: document.getElementById('importantData'), logWindow: document.getElementById('logWindow'), flash: document.getElementById('flash') };
+    const elements = { serialPort: document.getElementById('serialPort'), wifiSsid: document.getElementById('wifiSsid'), wifiPassword: document.getElementById('wifiPassword'), serverIp: document.getElementById('serverIp'), serverPort: document.getElementById('serverPort'), wifiTimeout: document.getElementById('wifiTimeout'), tcpTimeout: document.getElementById('tcpTimeout'), keepaliveMs: document.getElementById('keepaliveMs'), applyConfigButton: document.getElementById('applyConfigButton'), openButton: document.getElementById('openButton'), closeButton: document.getElementById('closeButton'), resetButton: document.getElementById('resetButton'), initializeButton: document.getElementById('initializeButton'), connectButton: document.getElementById('connectButton'), disconnectButton: document.getElementById('disconnectButton'), keepaliveButton: document.getElementById('keepaliveButton'), states: document.getElementById('states'), importantData: document.getElementById('importantData'), logWindow: document.getElementById('logWindow'), flash: document.getElementById('flash') };
     async function callJson(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Request failed'); return payload; }
     async function snapshot() { return callJson('/api/link'); }
     function setFlash(message, error = false) { elements.flash.textContent = message; elements.flash.style.color = error ? 'var(--danger)' : 'var(--ok)'; }
-    function render(snapshot) { elements.states.innerHTML = ''; snapshot.available_states.forEach((state) => { const chip = document.createElement('div'); chip.className = 'chip' + (snapshot.current_state === state ? ' active' : ''); chip.textContent = state; elements.states.appendChild(chip); }); elements.importantData.innerHTML = ''; Object.entries(snapshot.important_data).forEach(([key, value]) => { const card = document.createElement('div'); card.className = 'datum'; card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`; elements.importantData.appendChild(card); }); elements.logWindow.textContent = snapshot.logs.length ? snapshot.logs.join('\n') : 'No log lines yet.'; elements.logWindow.scrollTop = elements.logWindow.scrollHeight; if (!elements.serialPort.value) elements.serialPort.value = snapshot.serial_port; }
+    function render(snapshot) { elements.states.innerHTML = ''; snapshot.available_states.forEach((state) => { const chip = document.createElement('div'); chip.className = 'chip' + (snapshot.current_state === state ? ' active' : ''); chip.textContent = state; elements.states.appendChild(chip); }); elements.importantData.innerHTML = ''; Object.entries(snapshot.important_data).forEach(([key, value]) => { const card = document.createElement('div'); card.className = 'datum'; card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`; elements.importantData.appendChild(card); }); elements.logWindow.textContent = snapshot.logs.length ? snapshot.logs.join('\n') : 'No log lines yet.'; elements.logWindow.scrollTop = elements.logWindow.scrollHeight; elements.serialPort.value = snapshot.config.serial_port; elements.wifiSsid.value = snapshot.config.wifi_ssid; elements.wifiPassword.value = snapshot.config.wifi_password; elements.serverIp.value = snapshot.config.server_ip; elements.serverPort.value = snapshot.config.server_port; elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms; elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms; elements.keepaliveMs.value = snapshot.config.keepalive_period_ms; }
     async function refresh() { try { render(await snapshot()); } catch (error) { setFlash(error.message, true); } }
     async function post(url, body) { try { const payload = await callJson(url, body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : { method:'POST' }); render(payload); setFlash(`Updated via ${url}.`); } catch (error) { setFlash(error.message, true); } }
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close'));
+    elements.applyConfigButton.addEventListener('click', () => post('/api/config', { serial_port: elements.serialPort.value.trim() || 'COM4', wifi_ssid: elements.wifiSsid.value.trim(), wifi_password: elements.wifiPassword.value, server_ip: elements.serverIp.value.trim(), server_port: Number(elements.serverPort.value || 3333), wifi_connect_timeout_ms: Number(elements.wifiTimeout.value || 10000), tcp_connect_timeout_ms: Number(elements.tcpTimeout.value || 3000), keepalive_period_ms: Number(elements.keepaliveMs.value || 100) }));
     elements.resetButton.addEventListener('click', () => post('/api/command/reset'));
     elements.initializeButton.addEventListener('click', () => post('/api/command/initialize'));
     elements.connectButton.addEventListener('click', () => post('/api/command/connect'));
