@@ -1,0 +1,14 @@
+flowchart TD
+    CRC["CRC failure"] --> ERR["error state"]
+    HOST["Host watchdog failure"] --> ERR
+    DEV["Device watchdog failure"] --> ERR
+    USB["USB COM loss"] --> ERR
+    WIFI["Wi-Fi association failure"] --> ERR
+    TCP["TCP session loss"] --> ERR
+    MAL["Malformed packet / bad version"] --> ERR
+    DISC["Intentional disconnect"] --> RESET["reset state"]
+
+    ERR --> HARD["reset"]
+    ERR --> SOFT["initialize"]
+    HARD --> CONN["connect after normal sequence"]
+    SOFT --> CONN

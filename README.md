@@ -19,6 +19,40 @@
 - `README.md` is the workflow/session handoff file; the requirements/design document is the primary place for application requirements, UX intent, architecture decisions, and planned features.
 - Every time Codex opens and reviews `docs/EyalEspressoServerSimulatorRequirements and Design.docx`, Codex must update the document field `Reviewed on` with the current time.
 - After any documentation change in this repository, Codex must ask Eyal whether to open the docs folder.
+- Design documentation must be maintained in dual format:
+  - human review artifacts in .docx
+  - machine-readable architecture sources under docs/architecture/
+- The required machine-readable architecture sources are:
+  - docs/architecture/transport_state_machine.mmd
+  - docs/architecture/packet_flows.mmd
+  - docs/architecture/failure_modes.mmd
+  - docs/architecture/transport_contract.md
+- The text-based architecture sources are the canonical editable design source for workflow/state/packet behavior; rendered diagrams and .docx content must match them.
+- When workflow, state machines, packet definitions, failure handling, ownership, timing, watchdog rules, or transport architecture change, update both:
+  - the relevant .docx design documents
+  - the matching files under docs/architecture/
+- Do not maintain image-only diagrams as the sole source of truth. Every important workflow/state/failure diagram must also exist as text-based Mermaid and as structured tables in markdown.
+- Use exact code-facing names in documentation for states, packet types, counters, modules, and events. Do not rename concepts in prose if the code uses a different identifier.
+- Every state machine must be documented with:
+  - purpose and scope
+  - state list
+  - transition diagram
+  - transition table with current state, trigger, guard/condition, action, next state, and timeout/failure behavior
+- Every packet flow must be documented with:
+  - packet purpose
+  - sender and receiver
+  - required fields
+  - normal response
+  - timeout rule
+  - error handling
+- Every transport contract must explicitly document ownership of:
+  - liveness counters such as HostLiveInteger and DeviceLiveInteger
+  - CRC/checksum validation
+  - reconnect behavior
+  - watchdog enforcement
+  - entry to error, eset, and initialize
+- If Eyal edits .docx files manually, Codex must review those edits and update the text-based files under docs/architecture/ so future LLM work remains aligned.
+- If Codex updates the text-based architecture files first, Codex must also update the corresponding .docx documents before considering the documentation change complete.
 - Repository version is tracked in root `VERSION` with format `X.Y.Z`.
 - `X`: major functionality/refactoring changes.
 - `Y`: minor bug-fix and incremental functionality changes.
@@ -30,10 +64,11 @@
 - Repositories must not share tracked files. If another repository needs the same asset, script, or document, duplicate it into that repository and maintain the copies separately.
 - When a successful local verification cycle completes, play the project celebration sound from `sounds\build-success-monkey-1p5x.wav`.
 - When waiting for Eyal to do anything required to continue, including replying to a prompt, answering a question, approving a request, or simply not sending a new instruction while Codex is otherwise idle, play the project wait sound from `sounds\WaitSound.wav`.
-- For any such waiting state, play `sounds\WaitSound.wav` once immediately when the wait begins, then if 3 minutes pass without a response from Eyal, play it again and keep repeating it every additional 3 minutes until a response arrives or the task resumes.
+- For any such waiting state, play `sounds\WaitSound.wav` once immediately when the wait begins, then if 3 minutes pass without a response from Eyal, play it again and keep repeating it every additional 3 minutes until a response arrives or the task resumes.`r`n- Wait-sound playback is a best-effort local notification only. Codex can verify that the helper scripts start and stop successfully, but cannot verify that Eyal actually heard audio on the active output device.
 - Session hook for the wait sound:
-  - immediately before sending a prompt, question, or approval request that requires Eyal to respond, run `scripts\start_wait_sound.ps1`
+  - immediately before sending an explicit chat prompt or question that requires Eyal to respond in the conversation, run `scripts\start_wait_sound.ps1`
   - immediately after Eyal responds, run `scripts\stop_wait_sound.ps1`
+  - do not rely on the wait sound for hidden tool-approval popups, internal sandbox approval flows, or other non-chat waits because Eyal may not hear or notice those cases
 - Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
 - This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.

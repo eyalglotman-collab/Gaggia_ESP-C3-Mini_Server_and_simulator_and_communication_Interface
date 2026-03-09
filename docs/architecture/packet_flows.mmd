@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph RESET["RESET"]
+        R1["Host sends RESET(profile or parameters)"] --> R2["Bridge clears counters and buffers"]
+        R2 --> R3["Bridge runs self-test"]
+        R3 --> R4["Bridge returns RESET_ACK"]
+    end
+
+    subgraph INITIALIZE["INITIALIZE"]
+        I1["Host sends INITIALIZE(role, endpoint, watchdog)"] --> I2["Bridge validates configuration"]
+        I2 --> I3["Bridge prepares Wi-Fi/TCP resources"]
+        I3 --> I4["Bridge returns INITIALIZE_ACK"]
+    end
+
+    subgraph CONNECT["CONNECT"]
+        C1["Host sends CONNECT"] --> C2["Bridge opens/accepts low-level session"]
+        C2 --> C3["Bridge returns CONNECT_ACK"]
+        C3 --> C4["Both sides enter 100 mSec keep-alive supervision"]
+    end
+
+    subgraph DISCONNECT["DISCONNECT"]
+        D1["Host sends DISCONNECT(reason)"] --> D2["Bridge tears down session cleanly"]
+        D2 --> D3["Bridge returns DISCONNECT_ACK"]
+        D3 --> D4["Supervisor returns to reset"]
+    end
+
+    subgraph KEEPALIVE["KEEPALIVE"]
+        K1["Host sends KEEPALIVE with incremented HostLiveInteger"] --> K2["Bridge validates host forward progress"]
+        K2 --> K3["Bridge replies with KEEPALIVE_ACK and DeviceLiveInteger"]
+        K3 --> K4["Host validates timing and bridge progress"]
+    end
+
+    subgraph DATA["DATA"]
+        P1["Upper layer sends DATA payload"] --> P2["Low-level layer validates framing and CRC"]
+        P2 --> P3["Validated payload is forwarded"]
+        P3 --> P4["Peer returns DATA response or ACK"]
+    end
+
+    subgraph ERROR["ERROR"]
+        E1["Faulting side latches low-level fault"] --> E2["ERROR packet reports code, state, counters, summary"]
+        E2 --> E3["Supervisor decides reset or initialize"]
+    end

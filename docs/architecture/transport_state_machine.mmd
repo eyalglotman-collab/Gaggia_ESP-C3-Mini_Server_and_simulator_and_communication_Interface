@@ -1,0 +1,21 @@
+stateDiagram-v2
+    [*] --> reset
+    reset --> initialize: reset complete / self-test passed
+    initialize --> connect: configuration valid / transport prepared
+    initialize --> error: invalid config or bring-up failure
+    connect --> disconnect: intentional disconnect command
+    connect --> error: CRC fault, timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
+    disconnect --> reset: controlled shutdown complete
+    disconnect --> error: shutdown failure
+    error --> reset: explicit hard recovery
+    error --> initialize: explicit soft recovery
+
+    state reset {
+        [*] --> self_test
+        self_test --> load_params
+    }
+
+    state connect {
+        [*] --> link_establish
+        link_establish --> keepalive_supervision
+    }
