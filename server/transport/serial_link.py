@@ -92,9 +92,19 @@ class SerialLinkManager:
                 return self._snapshot_locked()
             try:
                 if "://" in self._port_name:
-                    self._serial = serial.serial_for_url(self._port_name, self._baud_rate, timeout=0.1)
+                    self._serial = serial.serial_for_url(
+                        self._port_name,
+                        self._baud_rate,
+                        timeout=0.1,
+                        write_timeout=0.25,
+                    )
                 else:
-                    self._serial = serial.Serial(self._port_name, self._baud_rate, timeout=0.1)
+                    self._serial = serial.Serial(
+                        self._port_name,
+                        self._baud_rate,
+                        timeout=0.1,
+                        write_timeout=0.25,
+                    )
             except Exception as exc:  # pragma: no cover
                 self._serial = None
                 self._set_event(f"Failed to open serial port {self._port_name}.", str(exc))
@@ -109,13 +119,17 @@ class SerialLinkManager:
         with self._lock:
             self._reader_running = False
             current = self._serial
+            current_reader = self._reader_thread
             self._serial = None
+            self._reader_thread = None
         if current is not None:
             try:
                 if getattr(current, "is_open", False):
                     current.close()
             except Exception:
                 pass
+        if current_reader is not None and current_reader.is_alive():
+            current_reader.join(timeout=0.3)
         with self._lock:
             self._set_event(f"Closed serial port {self._port_name}.")
             return self._snapshot_locked()
@@ -126,7 +140,11 @@ class SerialLinkManager:
             current = self._serial
             if current is None or not getattr(current, "is_open", False):
                 raise RuntimeError(f"Serial port {self._port_name} is not open.")
-            current.write(data)
+            try:
+                current.write(data)
+            except Exception as exc:
+                self._set_event(f"TX failed on {self._port_name}.", str(exc))
+                raise RuntimeError(str(exc)) from exc
             self._tx_frames += 1
             self._tx_bytes += len(data)
             self._last_tx_at = self._timestamp()

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
+from traceback import format_exception_only
 
 from server.transport.frame_codec import Frame, MessageType
 from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
@@ -81,6 +82,9 @@ class LinkRuntime:
         self._last_keepalive_tx: datetime | None = None
         self._last_valid_rx: datetime | None = None
         self._last_error = ""
+        self._last_monitor_event = "Simulator monitor ready."
+        self._last_monitor_at = self._timestamp()
+        self._last_snapshot_poll_at: datetime | None = None
         self._wifi_ready = False
         self._wifi_connected = False
         self._tcp_connected = False
@@ -107,6 +111,40 @@ class LinkRuntime:
         """
 
         self._set_state(LinkState.ERROR, "Transport fault latched.", message)
+
+    def note_monitor_event(self, category: str, message: str, *, throttle_snapshot: bool = False) -> None:
+        """@brief Record a monitor-visible event into the runtime log stream.
+
+        @details This gives the UI logger a consistent place to show backend
+        monitoring events such as API invokes, throttled snapshot polls, and
+        fail-safe transitions while avoiding excessive log spam from frequent
+        `/api/link` refreshes.
+        """
+
+        with self._lock:
+            now = datetime.now(UTC)
+            if throttle_snapshot and self._last_snapshot_poll_at is not None:
+                if now - self._last_snapshot_poll_at < timedelta(seconds=5):
+                    return
+            if throttle_snapshot:
+                self._last_snapshot_poll_at = now
+            self._last_monitor_event = f"{category}: {message}"
+            self._last_monitor_at = self._timestamp()
+            self._append_log(f"[monitor] {self._last_monitor_event}")
+
+    def capture_internal_failure(self, context: str, exc: Exception) -> LinkSnapshot:
+        """@brief Latch an unexpected internal exception as a safe snapshot.
+
+        @details This fail-safe path keeps the API responsive even if an
+        unexpected runtime exception occurs inside a transport action.
+        """
+
+        with self._lock:
+            detail = "".join(format_exception_only(type(exc), exc)).strip()
+            self._last_monitor_event = f"fail-safe: {context}"
+            self._last_monitor_at = self._timestamp()
+            self._set_error(f"{context}: {detail or 'generic unknown failure'}")
+            return self._snapshot_locked()
 
     def _next_sequence(self) -> int:
         self._sequence = (self._sequence + 1) % 65536
@@ -237,12 +275,21 @@ class LinkRuntime:
             if port_name:
                 self._config.serial_port = port_name.strip() or self._config.serial_port
                 serial_link_manager.configure_port(self._config.serial_port)
-            try:
-                serial_link_manager.open_port()
-            except RuntimeError:
+            target_port = self._config.serial_port
+            transport_snapshot = serial_link_manager.get_snapshot()
+            if transport_snapshot.port_open and transport_snapshot.port_name == target_port:
+                self._append_log(f"Serial transport already open on {target_port}; open request ignored.")
+                return self._snapshot_locked()
+
+        try:
+            serial_link_manager.open_port()
+        except RuntimeError:
+            with self._lock:
                 self._bridge_ready = False
                 self._set_error("COM port not found")
                 return self._snapshot_locked()
+
+        with self._lock:
             self._bridge_ready = True
             self._append_log("Serial transport opened.")
             return self._snapshot_locked()
@@ -358,6 +405,8 @@ class LinkRuntime:
             "Sequence": str(self._sequence),
             "Watchdog Armed": "Yes" if self._watchdog_armed else "No",
             "Last Transition": self._last_transition_at,
+            "Last Monitor Event": self._last_monitor_event,
+            "Last Monitor At": self._last_monitor_at,
             "Last RX": transport_snapshot.last_rx_at,
             "Last TX": transport_snapshot.last_tx_at,
             "Last Error": self._last_error or transport_snapshot.last_error or "None",
