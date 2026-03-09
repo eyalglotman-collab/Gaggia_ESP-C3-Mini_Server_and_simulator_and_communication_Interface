@@ -1,0 +1,21 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.portWin": "COM4",
+  "idf.espIdfPathWin": "C:\\Espressif\\.espressif\\v5.5.2\\esp-idf",
+  "idf.toolsPathWin": "C:\\Espressif",
+  "idf.pythonInstallPath": "C:\\Espressif\\python_env\\idf5.5_py3.11_env\\Scripts\\python.exe",
+  "idf.gitPathWin": "C:\\Program Files\\Git\\cmd\\git.exe",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c3"
+  },
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Espressif\\Eyal_Projects_ESP32_S3\\Eyal_espresso_server_simulator\\.idfbuild\\esp32c3_bridge"
+  ],
+  "idf.flashType": "UART",
+  "idf.monitorPortWin": "COM4",
+  "idf.currentSetup": "C:\\Espressif\\.espressif\\v5.5.2\\esp-idf",
+  "idf.monitorPort": "COM4",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe"
+}
