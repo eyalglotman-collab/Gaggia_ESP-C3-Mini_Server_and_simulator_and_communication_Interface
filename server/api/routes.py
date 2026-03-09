@@ -1,4 +1,4 @@
-"""API route registration helpers."""
+"""API route registration helpers for the transport-first simulator."""
 
 from __future__ import annotations
 
@@ -7,48 +7,69 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from server.sim.controller_state import SimulatorState, simulator_runtime
+from server.sim.link_state_machine import link_runtime
 
 router = APIRouter(prefix="/api", tags=["simulator"])
 
 
-class ConnectRequest(BaseModel):
-    client_ip_address: str = Field(..., min_length=1, max_length=64)
+class PortRequest(BaseModel):
+    port_name: str = Field(..., min_length=1, max_length=64)
 
 
-class SetStateRequest(BaseModel):
-    state: SimulatorState
+@router.get("/link")
+def get_link_snapshot() -> dict[str, object]:
+    return asdict(link_runtime.get_snapshot())
 
 
-@router.get("/simulator")
-def get_simulator_snapshot() -> dict[str, object]:
-    return asdict(simulator_runtime.get_snapshot())
-
-
-@router.post("/connect")
-def connect_to_client(request: ConnectRequest) -> dict[str, object]:
+@router.post("/transport/open")
+def open_transport(request: PortRequest) -> dict[str, object]:
     try:
-        return asdict(simulator_runtime.connect_to_client(request.client_ip_address))
-    except ValueError as exc:
+        link_runtime.configure_port(request.port_name)
+        return asdict(link_runtime.open_transport())
+    except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/state")
-def set_simulator_state(request: SetStateRequest) -> dict[str, object]:
+@router.post("/transport/close")
+def close_transport() -> dict[str, object]:
+    return asdict(link_runtime.close_transport())
+
+
+@router.post("/command/reset")
+def command_reset() -> dict[str, object]:
     try:
-        return asdict(simulator_runtime.set_state(request.state))
-    except ValueError as exc:
+        return asdict(link_runtime.reset())
+    except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/brew/start")
-def start_brew() -> dict[str, object]:
+@router.post("/command/initialize")
+def command_initialize() -> dict[str, object]:
     try:
-        return asdict(simulator_runtime.start_brew())
-    except ValueError as exc:
+        return asdict(link_runtime.initialize())
+    except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/brew/stop")
-def stop_brew() -> dict[str, object]:
-    return asdict(simulator_runtime.go_idle())
+@router.post("/command/connect")
+def command_connect() -> dict[str, object]:
+    try:
+        return asdict(link_runtime.connect())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command/disconnect")
+def command_disconnect() -> dict[str, object]:
+    try:
+        return asdict(link_runtime.disconnect())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/command/keepalive")
+def command_keepalive() -> dict[str, object]:
+    try:
+        return asdict(link_runtime.send_keepalive())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

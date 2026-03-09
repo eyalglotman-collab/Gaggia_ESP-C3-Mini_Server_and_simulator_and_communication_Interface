@@ -1,4 +1,4 @@
-"""FastAPI entry point for the Eyal Espresso server simulator."""
+"""FastAPI entry point for the transport-first simulator template."""
 
 from __future__ import annotations
 
