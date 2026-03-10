@@ -6,6 +6,11 @@
 - Summary: Expanded the simulator transport UI, documented the updated launch/workflow rules, and refined logger/state display behavior.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-10 21:10:41\b0\par
+- Version: 0.1.4\par
+- Summary: Refined simulator navigation alignment and condensed the stacked operator layout.\par
+- Notes: Made the Operational navigation button align the Operational window to the top of the scrollable content area, reduced overall UI dimensions by roughly twenty percent while keeping logger text size unchanged, adjusted fixed logger window sizing to preserve internal scrolling, and increased logger text size and general control scaling in the current stacked-window design iteration.\par
+\par
 \b 2026-03-10 15:26:00\b0\par
 - Version: 0.1.4\par
 - Summary: Refined the simulator operator UI and completed revision-control documentation for the current workflow.\par

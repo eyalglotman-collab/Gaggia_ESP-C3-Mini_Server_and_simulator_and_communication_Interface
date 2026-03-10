@@ -31,6 +31,8 @@
     * { box-sizing:border-box; }
     body {
       margin:0;
+      min-height:100vh;
+      overflow:hidden;
       font-family:Bahnschrift,"Segoe UI",sans-serif;
       color:var(--text);
       background:
@@ -40,37 +42,44 @@
     }
 
     main {
-      width:min(96vw, 1980px);
-      min-height:min(88vh, 1080px);
+      width:min(99vw, 1742px);
+      height:min(96vh, 950px);
       margin:2vh auto;
-      padding:24px;
+      padding:19px;
       border:1px solid var(--line);
-      border-radius:28px;
+      border-radius:22px;
       background:rgba(7,18,29,.86);
       box-shadow:var(--shadow);
       display:flex;
       flex-direction:column;
-      gap:18px;
+      gap:14px;
+      overflow:hidden;
     }
 
     .topbar {
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:18px;
+      gap:14px;
       flex-wrap:wrap;
+      flex:0 0 auto;
+      position:sticky;
+      top:0;
+      z-index:5;
+      padding-bottom:10px;
+      background:linear-gradient(180deg, rgba(7,18,29,.98), rgba(7,18,29,.94) 72%, rgba(7,18,29,0));
     }
 
     .hero {
       display:flex;
       flex-direction:column;
-      gap:6px;
+      gap:5px;
     }
 
     .label {
       display:block;
-      margin-bottom:8px;
-      font-size:.78rem;
+      margin-bottom:6px;
+      font-size:.75rem;
       text-transform:uppercase;
       letter-spacing:.14em;
       color:var(--muted);
@@ -80,36 +89,46 @@
       color:var(--muted);
       text-transform:uppercase;
       letter-spacing:.18em;
-      font-size:.72rem;
+      font-size:.69rem;
     }
 
     .title {
       margin:0;
-      font-size:2.2rem;
+      font-size:2.11rem;
       text-transform:uppercase;
       letter-spacing:.08em;
     }
 
     .note, .flash {
       color:var(--muted);
+      font-size:.96rem;
     }
 
     .nav {
       display:flex;
-      gap:12px;
+      gap:10px;
       flex-wrap:wrap;
     }
 
     .nav button {
-      min-width:220px;
+      min-width:176px;
     }
 
     .workspace {
-      display:grid;
-      grid-template-columns:1.74fr .46fr;
-      gap:18px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
       flex:1;
       min-height:0;
+      overflow:auto;
+      padding-right:4px;
+    }
+
+    .window-stack {
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      min-height:min-content;
     }
 
     .window-shell {
@@ -117,10 +136,15 @@
       flex-direction:column;
       min-height:0;
       border:1px solid rgba(96,202,255,.18);
-      border-radius:24px;
+      border-radius:19px;
       background:linear-gradient(180deg, rgba(8,18,28,.88), rgba(5,12,20,.9));
       overflow:hidden;
       box-shadow:var(--shadow);
+    }
+
+    #windowOperational,
+    #windowImportantData {
+      width:100%;
     }
 
     .window-shell.active-window {
@@ -134,15 +158,15 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
-      padding:14px 18px;
+      gap:10px;
+      padding:11px 14px;
       border-bottom:1px solid rgba(96,202,255,.16);
       background:linear-gradient(180deg, rgba(18,36,52,.9), rgba(11,22,34,.92));
     }
 
     .window-title {
       margin:0;
-      font-size:1.1rem;
+      font-size:1.06rem;
       letter-spacing:.08em;
       text-transform:uppercase;
     }
@@ -150,16 +174,16 @@
     .window-content {
       flex:1;
       min-height:0;
-      padding:18px;
+      padding:14px;
       display:flex;
       flex-direction:column;
-      gap:18px;
+      gap:14px;
     }
 
     .operational-layout {
       display:grid;
       grid-template-columns:1fr 1.08fr;
-      gap:18px;
+      gap:14px;
       width:100%;
       min-height:0;
       flex:1;
@@ -167,8 +191,8 @@
 
     .panel {
       border:1px solid var(--line);
-      border-radius:22px;
-      padding:20px;
+      border-radius:18px;
+      padding:16px;
       background:linear-gradient(180deg, rgba(10,24,38,.96), rgba(7,16,25,.94));
       min-height:0;
     }
@@ -180,36 +204,44 @@
       align-items:stretch;
     }
 
+    .logger-panel {
+      height:100%;
+      min-height:624px;
+      max-height:624px;
+    }
+
     .row {
       display:flex;
-      gap:12px;
+      gap:10px;
       flex-wrap:wrap;
       align-items:end;
     }
 
     input {
-      width:220px;
-      height:48px;
-      border-radius:14px;
+      width:176px;
+      height:38px;
+      border-radius:11px;
       border:1px solid rgba(96,202,255,.26);
       background:#03111c;
       color:var(--text);
-      padding:0 14px;
+      padding:0 11px;
+      font-size:.96rem;
     }
 
     .config-grid {
       display:grid;
-      gap:12px;
+      gap:10px;
       grid-template-columns:repeat(3, minmax(0, 1fr));
-      margin-top:18px;
+      margin-top:14px;
     }
 
     button {
-      min-height:46px;
-      border-radius:14px;
+      min-height:37px;
+      border-radius:11px;
       border:1px solid rgba(111,149,173,.48);
-      padding:0 18px;
+      padding:0 14px;
       font-weight:700;
+      font-size:.88rem;
       letter-spacing:.08em;
       text-transform:uppercase;
       color:#e8f8ff;
@@ -280,14 +312,14 @@
     .states {
       display:flex;
       flex-wrap:wrap;
-      gap:10px;
-      margin-top:16px;
+      gap:8px;
+      margin-top:13px;
     }
 
     .state-group {
-      margin-top:18px;
-      padding:16px;
-      border-radius:18px;
+      margin-top:14px;
+      padding:13px;
+      border-radius:14px;
       border:1px solid var(--status-border);
       background:
         linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0) 28%),
@@ -295,16 +327,16 @@
     }
 
     .state-pill {
-      min-height:46px;
-      min-width:136px;
+      min-height:37px;
+      min-width:109px;
       display:flex;
       align-items:center;
       justify-content:center;
-      padding:0 18px;
-      border-radius:14px;
+      padding:0 14px;
+      border-radius:11px;
       text-transform:uppercase;
       letter-spacing:.08em;
-      font-size:.86rem;
+      font-size:.82rem;
       font-weight:700;
       color:#d2dde7;
       background:
@@ -360,8 +392,8 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
-      margin-bottom:12px;
+      gap:10px;
+      margin-bottom:10px;
     }
 
     .logger-header .label {
@@ -371,29 +403,29 @@
     .data-grid {
       display:grid;
       grid-template-columns:repeat(3, minmax(0, 1fr));
-      gap:12px;
-      margin-top:6px;
+      gap:10px;
+      margin-top:5px;
       align-content:start;
     }
 
     .datum {
-      border-radius:16px;
+      border-radius:13px;
       border:1px solid rgba(96,202,255,.18);
       background:rgba(6,19,31,.86);
-      padding:14px;
-      min-height:102px;
+      padding:11px;
+      min-height:82px;
     }
 
     .datum .k {
       color:var(--muted);
-      font-size:.74rem;
+      font-size:.71rem;
       text-transform:uppercase;
       letter-spacing:.12em;
     }
 
     .datum .v {
-      margin-top:8px;
-      font-size:1rem;
+      margin-top:6px;
+      font-size:.96rem;
       font-weight:600;
       word-break:break-word;
     }
@@ -410,13 +442,13 @@
       padding:16px;
       color:#c9f2ff;
       font-family:Consolas,"Cascadia Mono",monospace;
-      font-size:.88rem;
+      font-size:.97rem;
       white-space:pre-wrap;
     }
 
     @media (max-width: 1500px) {
       main {
-        width:min(92vw, 1480px);
+        width:min(98vw, 1628px);
       }
 
       .workspace,
@@ -431,8 +463,8 @@
 
     @media (max-width: 780px) {
       main {
-        width:min(96vw, 1480px);
-        min-height:auto;
+        width:min(99vw, 1628px);
+        height:96vh;
         margin:2vh auto;
         padding:18px;
       }
@@ -468,77 +500,79 @@
     </section>
 
     <section class="workspace">
-      <section id="windowOperational" class="window-shell active-window">
-        <div class="window-bar">
-          <div>
-            <div class="eyebrow">Screen 1</div>
-            <h2 class="window-title">Operational</h2>
+      <div class="window-stack">
+        <section id="windowOperational" class="window-shell active-window">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 1</div>
+              <h2 class="window-title">Operational</h2>
+            </div>
           </div>
-        </div>
-        <div class="window-content">
-          <div class="operational-layout">
-        <section class="panel">
-          <div class="label">Operational</div>
-          <div class="row">
-            <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
-            <button id="openButton" type="button">Open Port</button>
-            <button id="closeButton" type="button" class="secondary">Close Port</button>
-          </div>
+          <div class="window-content">
+            <div class="operational-layout">
+          <section class="panel">
+            <div class="label">Operational</div>
+            <div class="row">
+              <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
+              <button id="openButton" type="button">Open Port</button>
+              <button id="closeButton" type="button" class="secondary">Close Port</button>
+            </div>
 
-          <div class="config-grid">
-            <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
-            <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
-            <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
-            <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
-            <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
-            <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
-          </div>
+            <div class="config-grid">
+              <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
+              <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
+              <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
+              <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
+              <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
+              <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
+            </div>
 
-          <div class="row" style="margin-top:12px">
-            <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
-            <button id="applyConfigButton" type="button">Apply Transport Config</button>
-          </div>
+            <div class="row" style="margin-top:12px">
+              <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
+              <button id="applyConfigButton" type="button">Apply Transport Config</button>
+            </div>
 
-          <div class="actions">
-            <button id="resetButton" type="button">Reset</button>
-            <button id="initializeButton" type="button" class="secondary">Initialize</button>
-            <button id="connectButton" type="button">Connect</button>
-            <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
-            <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
-          </div>
+            <div class="actions">
+              <button id="resetButton" type="button">Reset</button>
+              <button id="initializeButton" type="button" class="secondary">Initialize</button>
+              <button id="connectButton" type="button">Connect</button>
+              <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
+              <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
+            </div>
 
-          <section class="state-group">
-            <div class="label">Machine State</div>
-            <div id="states" class="states"></div>
+            <section class="state-group">
+              <div class="label">Machine State</div>
+              <div id="states" class="states"></div>
+            </section>
+            <div id="flash" class="flash" style="margin-top:14px"></div>
           </section>
-          <div id="flash" class="flash" style="margin-top:14px"></div>
+
+          <section class="panel stack logger-panel">
+            <div class="logger-header">
+              <div class="label">Logger Output</div>
+              <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
+            </div>
+            <pre id="logWindow">Loading transport snapshot...</pre>
+          </section>
+            </div>
+          </div>
         </section>
 
-        <section class="panel stack">
-          <div class="logger-header">
-            <div class="label">Logger Output</div>
-            <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
+        <section id="windowImportantData" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 2</div>
+              <h2 class="window-title">Important Data</h2>
+            </div>
           </div>
-          <pre id="logWindow">Loading transport snapshot...</pre>
+          <div class="window-content">
+        <section class="panel stack" style="width:100%">
+          <div class="label">Important Data</div>
+          <div id="importantData" class="data-grid"></div>
         </section>
           </div>
-        </div>
-      </section>
-
-      <section id="windowImportantData" class="window-shell">
-        <div class="window-bar">
-          <div>
-            <div class="eyebrow">Screen 2</div>
-            <h2 class="window-title">Important Data</h2>
-          </div>
-        </div>
-        <div class="window-content">
-      <section class="panel stack" style="width:100%">
-        <div class="label">Important Data</div>
-        <div id="importantData" class="data-grid"></div>
-      </section>
-        </div>
-      </section>
+        </section>
+      </div>
     </section>
   </main>
 
@@ -565,6 +599,7 @@
       navImportantData: document.getElementById('navImportantData'),
       windowOperational: document.getElementById('windowOperational'),
       windowImportantData: document.getElementById('windowImportantData'),
+      workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
       importantData: document.getElementById('importantData'),
       logWindow: document.getElementById('logWindow'),
@@ -669,7 +704,8 @@
       elements.navOperational.classList.toggle('secondary', !operational);
       elements.navImportantData.classList.toggle('secondary', operational);
       const target = operational ? elements.windowOperational : elements.windowImportantData;
-      target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      const topOffset = target.offsetTop - elements.workspace.offsetTop;
+      elements.workspace.scrollTo({ top: Math.max(0, topOffset), behavior: 'smooth' });
     }
 
     function renderStates(snapshot) {
