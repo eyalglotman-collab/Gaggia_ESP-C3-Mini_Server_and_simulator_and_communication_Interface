@@ -86,6 +86,9 @@
 - Every simulator application launch during Eyal's testing must run with event and logger monitoring enabled so the UI and backend collect actionable runtime data while Eyal exercises the system.
 - For this project, the startup order is mandatory:
   - launch the repository `.venv`-backed Python application first
+  - the default reliable persistent host method is to start a dedicated PowerShell process that runs:
+    - `Set-Location <repo-root>; .\.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8000`
+  - prefer that persistent PowerShell-hosted launch method over direct detached `Start-Process` calls to `python.exe`, because the persistent host method has been more reliable on this machine
   - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
   - before opening the browser, clear or bypass cached page state so the browser loads the latest simulator UI instead of stale frontend assets
   - only after that open the browser/UI
