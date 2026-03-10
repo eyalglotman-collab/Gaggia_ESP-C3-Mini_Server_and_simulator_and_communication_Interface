@@ -56,6 +56,10 @@
 - Once Eyal establishes manual formatting in a `.docx` document, future `.docx` edits must preserve the existing headings, styles, bullets, numbering, fonts, tables, figure placement, and general layout unless Eyal explicitly asks to change them.
 - After manual formatting exists, do not replace the entire `.docx` as a regeneration strategy for normal documentation updates. Prefer targeted in-place OpenXML edits that preserve the existing presentation layer.
 - Limit PowerShell command payloads to at most 7000 characters. If a change would require a longer command, split it into smaller commands or use repo-local scripts/files so the command fits reliably within host/tooling limits.
+- Approval workflow note for this and future project repos:
+  - prefer persistent approvals for narrowly scoped, reusable command prefixes instead of one-off approvals for whole commands
+  - good approval scope includes common local workflows such as repo-local Python launches, repo-local PowerShell helper scripts, health checks, tests, build commands, flash commands, and browser opens
+  - do not rely on blanket approval for all Python or all PowerShell commands; approvals should stay specific enough to remain safe and auditable
 - Repository version is tracked in root `VERSION` with format `X.Y.Z`.
 - `X`: major functionality/refactoring changes.
 - `Y`: minor bug-fix and incremental functionality changes.
