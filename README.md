@@ -102,6 +102,15 @@
   - do not rely on the wait sound for hidden tool-approval popups, internal sandbox approval flows, or other non-chat waits because Eyal may not hear or notice those cases
 - Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
+- Simulator UI interaction rule:
+  - command buttons use blue as the default unpressed color
+  - when a command button is pressed it must turn gray and look pressed while the related state/action is still in progress
+  - when that state/action finishes, the button returns to the default blue unpressed appearance
+  - machine-state indication colors are:
+    - dark blue = inactive / default after reset
+    - blinking green = in progress
+    - red = finished with failure
+    - light green = finished with success
 - This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.
 - For USB serial integration, one background serial manager shall own the COM port and the FastAPI routes shall communicate with that manager instead of opening the port directly from request handlers.
 
