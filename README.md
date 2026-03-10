@@ -101,6 +101,7 @@
   - immediately after Eyal responds, run `scripts\stop_wait_sound.ps1`
   - do not rely on the wait sound for hidden tool-approval popups, internal sandbox approval flows, or other non-chat waits because Eyal may not hear or notice those cases
 - Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
+- For every instruction from Eyal, Codex must read the full text carefully, derive the complete set of concrete tasks implied by that instruction, execute all of them, and verify before responding that every identified task was actually followed up and finished.
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
 - Simulator UI interaction rule:
   - command buttons use blue as the default unpressed color
