@@ -82,6 +82,7 @@
 - For this project, the startup order is mandatory:
   - launch the repository `.venv`-backed Python application first
   - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
+  - before opening the browser, clear or bypass cached page state so the browser loads the latest simulator UI instead of stale frontend assets
   - only after that open the browser/UI
   - do not open the browser optimistically before backend startup is confirmed
 - When waiting for Eyal to do anything required to continue, including replying to a prompt, answering a question, approving a request, or simply not sending a new instruction while Codex is otherwise idle, play the project wait sound from `sounds\WaitSound.wav`.
