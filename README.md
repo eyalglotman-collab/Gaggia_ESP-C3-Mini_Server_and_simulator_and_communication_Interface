@@ -66,7 +66,12 @@
 - `Z`: sub-version increment for accepted successful local verification cycles.
 - After a successful local verification cycle, Codex must ask whether to commit current changes and bump `Z`.
 - After a successful client build+flash or simulator verification cycle that is meant to be exercised through the simulator UI, Codex must automatically run the simulator UI and ask Eyal whether it loaded successfully.
-- Every version bump must add a new entry to docs/REVISION_HISTORY.doc that includes the new version number, a timestamp, and a brief description of what changed relative to the previous version.
+- Every version bump and every project revision must add a new entry to docs/REVISION_HISTORY.doc.
+- Each REVISION_HISTORY entry must include:
+  - the version/revision number
+  - the date
+  - the time in `HH:MM:SS` format
+  - a brief description of what changed relative to the previous revision
 - Maintain `docs/REVISION_HISTORY.doc` with sections grouped by `X.Y`, a short change summary per entry, and a continuously maintained latest-version feature list.
 - Before informing Eyal to run a build, review the VS Code `PROBLEMS` panel and resolve all reported issues.
 - After every code change, Codex must perform local update/verification itself before reporting ready:
