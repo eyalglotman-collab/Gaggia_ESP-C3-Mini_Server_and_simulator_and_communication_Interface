@@ -209,3 +209,20 @@ def test_monitor_events_are_written_to_logs() -> None:
     payload = response.json()
     assert payload['important_data']['Last Monitor Event'].startswith('api:')
     assert any('[monitor]' in line for line in payload['logs'])
+
+
+def test_logs_are_newest_first_and_capped_to_2000() -> None:
+    client = TestClient(app)
+
+    with link_runtime._lock:  # noqa: SLF001 - regression check for rolling logger behavior
+        link_runtime._logs.clear()  # noqa: SLF001
+        serial_link_manager._logs.clear()  # noqa: SLF001
+        for index in range(2105):
+            link_runtime._logs.appendleft(f"[2026-03-10 12:{index // 60:02d}:{index % 60:02d}Z] runtime {index}")  # noqa: SLF001
+
+    response = client.get('/api/link')
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload['logs']) == 2000
+    assert payload['logs'][0].endswith('runtime 2104')
+    assert payload['logs'][-1].endswith('runtime 105')

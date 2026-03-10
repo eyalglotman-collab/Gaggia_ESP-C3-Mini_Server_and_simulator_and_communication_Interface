@@ -92,6 +92,29 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Malformed packet / unsupported version | Parser | Reject packet and latch fault | `reset` after protocol correction |
 | Intentional disconnect | Supervisor | Controlled shutdown | `reset` then normal reconnect sequence |
 
+## Simulator UI State and Command Feedback
+
+### Command Button Behavior
+
+| UI Element | Default Color | While In Progress | Finished Success | Finished Failure | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Command button | Blue | Gray and visually pressed | Return to default blue unpressed state | Return to default blue unpressed state | The temporary in-flight color indicates that the requested command or state transition is still running. |
+
+### Machine State Color Behavior
+
+| Machine State Visual | Meaning | Notes |
+| --- | --- | --- |
+| Dark blue | Inactive / default after reset | The state is not currently executing and has no completed-success latch. |
+| Blinking green | In progress | The state is currently executing and has not yet finished. |
+| Red | Finished state with failure | The state finished and the result is failure or fault. |
+| Light green | Finished state with success | The state finished and the result is success. |
+
+### UI Grouping Rule
+
+- Machine-state indications must appear in a dedicated titled group box named `Machine State`.
+- Command controls and machine-state indications must remain visually distinct so actions are not confused with state reporting.
+- The logger panel should remain separate from the machine-state group and continue to display the latest rolling transport history.
+
 ## Simulator Runtime Error Mapping
 
 | Condition | Simulator Error Text | Notes |

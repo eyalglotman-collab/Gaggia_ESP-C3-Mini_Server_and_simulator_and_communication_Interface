@@ -5,83 +5,799 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Eyal Espresso Transport Template</title>
   <style>
-    :root { --bg:#06101a; --panel:#091826; --line:rgba(96,202,255,.22); --text:#e8f8ff; --muted:#87afbf; --accent:#61e8ff; --accent2:#4f9bff; --ok:#7dffb4; --danger:#ff889e; }
-    * { box-sizing:border-box; } body { margin:0; font-family:Bahnschrift,"Segoe UI",sans-serif; color:var(--text); background:radial-gradient(circle at top left, rgba(97,232,255,.12), transparent 32%), linear-gradient(180deg,#06101a,#03070c); }
-    main { width:min(1240px, calc(100vw - 28px)); margin:20px auto; padding:24px; border:1px solid var(--line); border-radius:24px; background:rgba(7,18,29,.82); }
-    .grid { display:grid; gap:18px; grid-template-columns:1.05fr .95fr; } .panel { border:1px solid var(--line); border-radius:20px; padding:20px; background:linear-gradient(180deg, rgba(10,24,38,.95), rgba(7,16,25,.94)); }
-    .title { margin:0 0 10px; font-size:2.2rem; text-transform:uppercase; letter-spacing:.08em; } .note,.flash { color:var(--muted); } .label { display:block; margin-bottom:8px; font-size:.78rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; } input { width:220px; height:48px; border-radius:14px; border:1px solid rgba(96,202,255,.26); background:#03111c; color:var(--text); padding:0 14px; }
-    .config-grid { display:grid; gap:12px; grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:18px; }
-    button { min-height:42px; border:0; border-radius:14px; padding:0 16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#06111a; background:linear-gradient(135deg, var(--accent), var(--accent2)); cursor:pointer; }
-    button.secondary { color:var(--text); background:rgba(9,28,43,.88); border:1px solid rgba(96,202,255,.24); } button.warn { background:linear-gradient(135deg,#ffd08a,#ff9b68); color:#241103; }
-    .states,.actions,.data-grid { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; } .chip { padding:10px 14px; border-radius:999px; border:1px solid rgba(96,202,255,.24); color:var(--muted); background:rgba(5,15,24,.8); text-transform:uppercase; font-size:.78rem; } .chip.active { color:var(--text); border-color:rgba(97,232,255,.55); box-shadow:0 0 18px rgba(97,232,255,.1); }
-    .data-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .datum { border-radius:16px; border:1px solid rgba(96,202,255,.18); background:rgba(6,19,31,.86); padding:14px; } .datum .k { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.12em; } .datum .v { margin-top:8px; font-size:1rem; font-weight:600; word-break:break-word; }
-    pre { margin:0; height:540px; overflow:auto; border-radius:16px; border:1px solid rgba(96,202,255,.18); background:#020a11; padding:16px; color:#c9f2ff; font-family:Consolas,"Cascadia Mono",monospace; font-size:.88rem; white-space:pre-wrap; }
-    @media (max-width: 980px) { .grid { grid-template-columns:1fr; } .data-grid { grid-template-columns:1fr; } .config-grid { grid-template-columns:1fr; } pre { height:360px; } }
+    :root {
+      --bg:#06101a;
+      --panel:#0b1824;
+      --panel-soft:#0f2232;
+      --line:rgba(96,202,255,.22);
+      --text:#e8f8ff;
+      --muted:#87afbf;
+      --accent:#61e8ff;
+      --accent2:#4f9bff;
+      --ok:#b8ffd0;
+      --ok-border:#7dffb4;
+      --danger:#ff889e;
+      --shadow:0 18px 60px rgba(0,0,0,.38);
+      --button-face-1:#56b8d9;
+      --button-face-2:#2a6f97;
+      --button-face-3:#194b69;
+      --button-dark-1:#243645;
+      --button-dark-2:#121d26;
+      --button-dashboard-border:#6f95ad;
+      --status-bg:#07121b;
+      --status-border:rgba(140,170,188,.22);
+    }
+
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family:Bahnschrift,"Segoe UI",sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(97,232,255,.14), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(79,155,255,.12), transparent 28%),
+        linear-gradient(180deg,#06101a,#03070c);
+    }
+
+    main {
+      width:min(96vw, 1980px);
+      min-height:min(88vh, 1080px);
+      margin:2vh auto;
+      padding:24px;
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:rgba(7,18,29,.86);
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
+
+    .topbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      flex-wrap:wrap;
+    }
+
+    .hero {
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+
+    .label {
+      display:block;
+      margin-bottom:8px;
+      font-size:.78rem;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      color:var(--muted);
+    }
+
+    .eyebrow {
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      font-size:.72rem;
+    }
+
+    .title {
+      margin:0;
+      font-size:2.2rem;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+    }
+
+    .note, .flash {
+      color:var(--muted);
+    }
+
+    .nav {
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .nav button {
+      min-width:220px;
+    }
+
+    .workspace {
+      display:grid;
+      grid-template-columns:1.74fr .46fr;
+      gap:18px;
+      flex:1;
+      min-height:0;
+    }
+
+    .window-shell {
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+      border:1px solid rgba(96,202,255,.18);
+      border-radius:24px;
+      background:linear-gradient(180deg, rgba(8,18,28,.88), rgba(5,12,20,.9));
+      overflow:hidden;
+      box-shadow:var(--shadow);
+    }
+
+    .window-shell.active-window {
+      border-color:rgba(125,255,180,.55);
+      box-shadow:
+        0 18px 60px rgba(0,0,0,.38),
+        0 0 0 1px rgba(125,255,180,.24);
+    }
+
+    .window-bar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 18px;
+      border-bottom:1px solid rgba(96,202,255,.16);
+      background:linear-gradient(180deg, rgba(18,36,52,.9), rgba(11,22,34,.92));
+    }
+
+    .window-title {
+      margin:0;
+      font-size:1.1rem;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+
+    .window-content {
+      flex:1;
+      min-height:0;
+      padding:18px;
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
+
+    .operational-layout {
+      display:grid;
+      grid-template-columns:1fr 1.08fr;
+      gap:18px;
+      width:100%;
+      min-height:0;
+      flex:1;
+    }
+
+    .panel {
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(10,24,38,.96), rgba(7,16,25,.94));
+      min-height:0;
+    }
+
+    .panel.stack {
+      display:flex;
+      flex-direction:column;
+      justify-content:flex-start;
+      align-items:stretch;
+    }
+
+    .row {
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:end;
+    }
+
+    input {
+      width:220px;
+      height:48px;
+      border-radius:14px;
+      border:1px solid rgba(96,202,255,.26);
+      background:#03111c;
+      color:var(--text);
+      padding:0 14px;
+    }
+
+    .config-grid {
+      display:grid;
+      gap:12px;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      margin-top:18px;
+    }
+
+    button {
+      min-height:46px;
+      border-radius:14px;
+      border:1px solid rgba(111,149,173,.48);
+      padding:0 18px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:#e8f8ff;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 28%),
+        linear-gradient(180deg, var(--button-face-1), var(--button-face-2) 58%, var(--button-face-3));
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.14),
+        inset 0 -1px 0 rgba(0,0,0,.22),
+        0 6px 14px rgba(0,0,0,.18);
+      cursor:pointer;
+    }
+
+    button.pending {
+      color:#d8e7f3;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, var(--button-dark-1), var(--button-dark-2));
+      border-color:rgba(111,149,173,.24);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.06),
+        inset 0 -1px 0 rgba(0,0,0,.28),
+        0 5px 12px rgba(0,0,0,.14);
+    }
+
+    button.success {
+      color:#10301d;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, rgba(208,255,223,.96), rgba(149,238,181,.94));
+      border-color:rgba(125,255,180,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.35),
+        inset 0 -1px 0 rgba(0,0,0,.12),
+        0 5px 12px rgba(68,162,109,.18);
+    }
+
+    button.failure {
+      color:#3a0711;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, rgba(255,186,196,.96), rgba(232,108,129,.94));
+      border-color:rgba(255,136,158,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.32),
+        inset 0 -1px 0 rgba(0,0,0,.12),
+        0 5px 12px rgba(176,66,98,.16);
+    }
+
+    button:hover {
+      filter:brightness(1.07);
+      transform:translateY(-1px);
+    }
+
+    button:active {
+      transform:translateY(1px);
+      box-shadow:
+        inset 0 2px 5px rgba(0,0,0,.28),
+        0 3px 8px rgba(0,0,0,.14);
+    }
+
+    button.secondary,
+    .state-pill {
+      color:inherit;
+    }
+
+    .actions,
+    .states {
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:16px;
+    }
+
+    .state-group {
+      margin-top:18px;
+      padding:16px;
+      border-radius:18px;
+      border:1px solid var(--status-border);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0) 28%),
+        linear-gradient(180deg, rgba(10,20,30,.96), rgba(6,12,19,.98));
+    }
+
+    .state-pill {
+      min-height:46px;
+      min-width:136px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:0 18px;
+      border-radius:14px;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      font-size:.86rem;
+      font-weight:700;
+      color:#d2dde7;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 34%),
+        linear-gradient(180deg, #1e2d39, #101b24);
+      border:1px solid rgba(130,154,170,.18);
+    }
+
+    .state-pill.active {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0) 34%),
+        linear-gradient(180deg, rgba(208,255,223,.96), rgba(149,238,181,.94));
+      color:#10301d;
+      border-color:rgba(125,255,180,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.4),
+        inset 0 -2px 0 rgba(0,0,0,.14),
+        0 0 18px rgba(125,255,180,.16);
+    }
+
+    .state-pill.in-progress {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0) 34%),
+        linear-gradient(180deg, rgba(149,238,181,.96), rgba(92,214,136,.94));
+      color:#0d2c18;
+      border-color:rgba(125,255,180,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.36),
+        inset 0 -2px 0 rgba(0,0,0,.14),
+        0 0 18px rgba(125,255,180,.18);
+      animation: stateBlink 1s ease-in-out infinite;
+    }
+
+    .state-pill.error-state {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 34%),
+        linear-gradient(180deg, rgba(255,186,196,.96), rgba(232,108,129,.94));
+      color:#3a0711;
+      border-color:rgba(255,136,158,.82);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.36),
+        inset 0 -2px 0 rgba(0,0,0,.14),
+        0 0 18px rgba(255,136,158,.14);
+    }
+
+    @keyframes stateBlink {
+      0% { opacity: 1; }
+      50% { opacity: .45; }
+      100% { opacity: 1; }
+    }
+
+    .logger-header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+
+    .logger-header .label {
+      margin-bottom:0;
+    }
+
+    .data-grid {
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:12px;
+      margin-top:6px;
+      align-content:start;
+    }
+
+    .datum {
+      border-radius:16px;
+      border:1px solid rgba(96,202,255,.18);
+      background:rgba(6,19,31,.86);
+      padding:14px;
+      min-height:102px;
+    }
+
+    .datum .k {
+      color:var(--muted);
+      font-size:.74rem;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+    }
+
+    .datum .v {
+      margin-top:8px;
+      font-size:1rem;
+      font-weight:600;
+      word-break:break-word;
+    }
+
+    pre {
+      margin:0;
+      flex:1;
+      min-height:0;
+      align-self:stretch;
+      overflow:auto;
+      border-radius:16px;
+      border:1px solid rgba(96,202,255,.18);
+      background:#020a11;
+      padding:16px;
+      color:#c9f2ff;
+      font-family:Consolas,"Cascadia Mono",monospace;
+      font-size:.88rem;
+      white-space:pre-wrap;
+    }
+
+    @media (max-width: 1500px) {
+      main {
+        width:min(92vw, 1480px);
+      }
+
+      .workspace,
+      .operational-layout {
+        grid-template-columns:1fr;
+      }
+
+      .data-grid {
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 780px) {
+      main {
+        width:min(96vw, 1480px);
+        min-height:auto;
+        margin:2vh auto;
+        padding:18px;
+      }
+
+      .config-grid,
+      .data-grid {
+        grid-template-columns:1fr;
+      }
+
+      input {
+        width:100%;
+      }
+
+      .nav button {
+        min-width:0;
+        flex:1;
+      }
+    }
   </style>
 </head>
 <body>
   <main>
-    <section class="panel">
-      <div class="label">Transport-First Simulator</div>
-      <h1 class="title">ESP32-C3 Link Console</h1>
-      <div class="note">Minimal debug surface for the PC host to own COM4, send framed commands, observe counters, and inspect raw transport logs before higher-level machine simulation is added.</div>
-      <div class="row" style="margin-top:18px">
-        <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
-        <button id="openButton" type="button">Open Port</button>
-        <button id="closeButton" type="button" class="secondary">Close Port</button>
+    <section class="topbar">
+      <div class="hero">
+        <div class="eyebrow">Transport-First Simulator</div>
+        <h1 class="title">ESP32-C3 Console</h1>
+        <div class="note">Two-screen operator surface for transport control, logger visibility, and runtime telemetry.</div>
       </div>
-      <div class="config-grid">
-        <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
-        <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
-        <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
-        <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
-        <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
-        <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
+      <div class="nav">
+        <button id="navOperational" type="button">Operational</button>
+        <button id="navImportantData" type="button" class="secondary">Important Data</button>
       </div>
-      <div class="row" style="margin-top:12px">
-        <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
-        <button id="applyConfigButton" type="button">Apply Transport Config</button>
-      </div>
-      <div class="actions">
-        <button id="resetButton" type="button" class="warn">Reset</button>
-        <button id="initializeButton" type="button" class="secondary">Initialize</button>
-        <button id="connectButton" type="button">Connect</button>
-        <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
-        <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
-      </div>
-      <div id="states" class="states"></div>
-      <div id="flash" class="flash" style="margin-top:14px"></div>
     </section>
-    <section class="grid" style="margin-top:18px">
-      <section class="panel">
+
+    <section class="workspace">
+      <section id="windowOperational" class="window-shell active-window">
+        <div class="window-bar">
+          <div>
+            <div class="eyebrow">Screen 1</div>
+            <h2 class="window-title">Operational</h2>
+          </div>
+        </div>
+        <div class="window-content">
+          <div class="operational-layout">
+        <section class="panel">
+          <div class="label">Operational</div>
+          <div class="row">
+            <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
+            <button id="openButton" type="button">Open Port</button>
+            <button id="closeButton" type="button" class="secondary">Close Port</button>
+          </div>
+
+          <div class="config-grid">
+            <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
+            <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
+            <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
+            <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
+            <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
+            <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
+          </div>
+
+          <div class="row" style="margin-top:12px">
+            <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
+            <button id="applyConfigButton" type="button">Apply Transport Config</button>
+          </div>
+
+          <div class="actions">
+            <button id="resetButton" type="button">Reset</button>
+            <button id="initializeButton" type="button" class="secondary">Initialize</button>
+            <button id="connectButton" type="button">Connect</button>
+            <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
+            <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
+          </div>
+
+          <section class="state-group">
+            <div class="label">Machine State</div>
+            <div id="states" class="states"></div>
+          </section>
+          <div id="flash" class="flash" style="margin-top:14px"></div>
+        </section>
+
+        <section class="panel stack">
+          <div class="logger-header">
+            <div class="label">Logger Output</div>
+            <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
+          </div>
+          <pre id="logWindow">Loading transport snapshot...</pre>
+        </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="windowImportantData" class="window-shell">
+        <div class="window-bar">
+          <div>
+            <div class="eyebrow">Screen 2</div>
+            <h2 class="window-title">Important Data</h2>
+          </div>
+        </div>
+        <div class="window-content">
+      <section class="panel stack" style="width:100%">
         <div class="label">Important Data</div>
         <div id="importantData" class="data-grid"></div>
       </section>
-      <section class="panel">
-        <div class="label">Logger Output</div>
-        <pre id="logWindow">Loading transport snapshot...</pre>
+        </div>
       </section>
     </section>
   </main>
+
   <script>
-    const elements = { serialPort: document.getElementById('serialPort'), wifiSsid: document.getElementById('wifiSsid'), wifiPassword: document.getElementById('wifiPassword'), serverIp: document.getElementById('serverIp'), serverPort: document.getElementById('serverPort'), wifiTimeout: document.getElementById('wifiTimeout'), tcpTimeout: document.getElementById('tcpTimeout'), keepaliveMs: document.getElementById('keepaliveMs'), applyConfigButton: document.getElementById('applyConfigButton'), openButton: document.getElementById('openButton'), closeButton: document.getElementById('closeButton'), resetButton: document.getElementById('resetButton'), initializeButton: document.getElementById('initializeButton'), connectButton: document.getElementById('connectButton'), disconnectButton: document.getElementById('disconnectButton'), keepaliveButton: document.getElementById('keepaliveButton'), states: document.getElementById('states'), importantData: document.getElementById('importantData'), logWindow: document.getElementById('logWindow'), flash: document.getElementById('flash') };
-    async function callJson(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Request failed'); return payload; }
-    async function snapshot() { return callJson('/api/link'); }
-    function setFlash(message, error = false) { elements.flash.textContent = message; elements.flash.style.color = error ? 'var(--danger)' : 'var(--ok)'; }
-    function setFlashFromSnapshot(snapshot, fallback = 'Updated.') { const transport = snapshot.transport || {}; const message = transport.last_error || transport.last_event || fallback; setFlash(message, Boolean(transport.last_error)); }
-    function render(snapshot) { elements.states.innerHTML = ''; snapshot.available_states.forEach((state) => { const chip = document.createElement('div'); chip.className = 'chip' + (snapshot.current_state === state ? ' active' : ''); chip.textContent = state; elements.states.appendChild(chip); }); elements.importantData.innerHTML = ''; Object.entries(snapshot.important_data).forEach(([key, value]) => { const card = document.createElement('div'); card.className = 'datum'; card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`; elements.importantData.appendChild(card); }); elements.logWindow.textContent = snapshot.logs.length ? snapshot.logs.join('\n') : 'No log lines yet.'; elements.logWindow.scrollTop = elements.logWindow.scrollHeight; elements.serialPort.value = snapshot.config.serial_port; elements.wifiSsid.value = snapshot.config.wifi_ssid; elements.wifiPassword.value = snapshot.config.wifi_password; elements.serverIp.value = snapshot.config.server_ip; elements.serverPort.value = snapshot.config.server_port; elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms; elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms; elements.keepaliveMs.value = snapshot.config.keepalive_period_ms; }
-    async function refresh() { try { render(await snapshot()); } catch (error) { setFlash(error.message, true); } }
-    async function post(url, body) { try { const payload = await callJson(url, body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : { method:'POST' }); render(payload); setFlashFromSnapshot(payload, `Updated via ${url}.`); } catch (error) { setFlash(error.message, true); } }
-    elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }));
-    elements.closeButton.addEventListener('click', () => post('/api/transport/close'));
-    elements.applyConfigButton.addEventListener('click', () => post('/api/config', { serial_port: elements.serialPort.value.trim() || 'COM4', wifi_ssid: elements.wifiSsid.value.trim(), wifi_password: elements.wifiPassword.value, server_ip: elements.serverIp.value.trim(), server_port: Number(elements.serverPort.value || 3333), wifi_connect_timeout_ms: Number(elements.wifiTimeout.value || 10000), tcp_connect_timeout_ms: Number(elements.tcpTimeout.value || 3000), keepalive_period_ms: Number(elements.keepaliveMs.value || 100) }));
-    elements.resetButton.addEventListener('click', () => post('/api/command/reset'));
-    elements.initializeButton.addEventListener('click', () => post('/api/command/initialize'));
-    elements.connectButton.addEventListener('click', () => post('/api/command/connect'));
-    elements.disconnectButton.addEventListener('click', () => post('/api/command/disconnect'));
-    elements.keepaliveButton.addEventListener('click', () => post('/api/command/keepalive'));
-    refresh(); setInterval(refresh, 1000);
+    const elements = {
+      serialPort: document.getElementById('serialPort'),
+      wifiSsid: document.getElementById('wifiSsid'),
+      wifiPassword: document.getElementById('wifiPassword'),
+      serverIp: document.getElementById('serverIp'),
+      serverPort: document.getElementById('serverPort'),
+      wifiTimeout: document.getElementById('wifiTimeout'),
+      tcpTimeout: document.getElementById('tcpTimeout'),
+      keepaliveMs: document.getElementById('keepaliveMs'),
+      applyConfigButton: document.getElementById('applyConfigButton'),
+      openButton: document.getElementById('openButton'),
+      closeButton: document.getElementById('closeButton'),
+      resetButton: document.getElementById('resetButton'),
+      initializeButton: document.getElementById('initializeButton'),
+      connectButton: document.getElementById('connectButton'),
+      disconnectButton: document.getElementById('disconnectButton'),
+      keepaliveButton: document.getElementById('keepaliveButton'),
+      loggerToggleButton: document.getElementById('loggerToggleButton'),
+      navOperational: document.getElementById('navOperational'),
+      navImportantData: document.getElementById('navImportantData'),
+      windowOperational: document.getElementById('windowOperational'),
+      windowImportantData: document.getElementById('windowImportantData'),
+      states: document.getElementById('states'),
+      importantData: document.getElementById('importantData'),
+      logWindow: document.getElementById('logWindow'),
+      flash: document.getElementById('flash'),
+    };
+    let latestLogs = [];
+    let loggerPaused = false;
+    let stateVisuals = {};
+    const asyncButtons = [
+      'openButton',
+      'closeButton',
+      'applyConfigButton',
+      'resetButton',
+      'initializeButton',
+      'connectButton',
+      'disconnectButton',
+      'keepaliveButton',
+    ];
+    const commandStateMap = {
+      resetButton: 'reset',
+      initializeButton: 'initialize',
+      connectButton: 'connect',
+      disconnectButton: 'disconnect',
+    };
+
+    async function callJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Request failed');
+      return payload;
+    }
+
+    async function snapshot() {
+      return callJson('/api/link');
+    }
+
+    function setFlash(message, error = false) {
+      elements.flash.textContent = message;
+      elements.flash.style.color = error ? 'var(--danger)' : 'var(--ok)';
+    }
+
+    function setFlashFromSnapshot(snapshot, fallback = 'Updated.') {
+      const transport = snapshot.transport || {};
+      const message = transport.last_error || transport.last_event || fallback;
+      setFlash(message, Boolean(transport.last_error));
+    }
+
+    function syncLoggerToggle() {
+      elements.loggerToggleButton.textContent = loggerPaused ? 'Resume Logger' : 'Pause Logger';
+    }
+
+    function clearButtonState(button) {
+      button.classList.remove('pending');
+    }
+
+    function setButtonState(button, state) {
+      clearButtonState(button);
+      if (state) {
+        button.classList.add(state);
+      }
+    }
+
+    function resetAsyncButtonStates(exceptButton = null) {
+      asyncButtons.forEach((key) => {
+        const button = elements[key];
+        if (button && button !== exceptButton) {
+          clearButtonState(button);
+        }
+      });
+    }
+
+    function resetStateVisuals(snapshot) {
+      const next = {};
+      snapshot.available_states.forEach((state) => {
+        next[state] = 'inactive';
+      });
+
+      if (snapshot.current_state) {
+        next[snapshot.current_state] = snapshot.last_error ? 'failure' : 'success';
+      }
+
+      if (!snapshot.last_error && snapshot.current_state === 'reset') {
+        next.reset = 'inactive';
+      }
+
+      stateVisuals = next;
+    }
+
+    function setStateVisual(stateName, visual) {
+      if (!stateName) {
+        return;
+      }
+      Object.keys(stateVisuals).forEach((key) => {
+        stateVisuals[key] = key === stateName ? visual : 'inactive';
+      });
+    }
+
+    function activateWindow(name) {
+      const operational = name === 'operational';
+      elements.windowOperational.classList.toggle('active-window', operational);
+      elements.windowImportantData.classList.toggle('active-window', !operational);
+      elements.navOperational.classList.toggle('secondary', !operational);
+      elements.navImportantData.classList.toggle('secondary', operational);
+      const target = operational ? elements.windowOperational : elements.windowImportantData;
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+
+    function renderStates(snapshot) {
+      elements.states.innerHTML = '';
+      snapshot.available_states.forEach((state) => {
+        const pill = document.createElement('div');
+        const visual = stateVisuals[state] || 'inactive';
+        let className = 'state-pill';
+        if (visual === 'success') {
+          className += ' active';
+        } else if (visual === 'progress') {
+          className += ' in-progress';
+        } else if (visual === 'failure') {
+          className += ' error-state';
+        }
+        pill.className = className;
+        pill.textContent = state;
+        elements.states.appendChild(pill);
+      });
+    }
+
+    function renderImportantData(snapshot) {
+      elements.importantData.innerHTML = '';
+      Object.entries(snapshot.important_data).forEach(([key, value]) => {
+        const card = document.createElement('div');
+        card.className = 'datum';
+        card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`;
+        elements.importantData.appendChild(card);
+      });
+    }
+
+    function render(snapshot) {
+      if (!Object.keys(stateVisuals).length) {
+        resetStateVisuals(snapshot);
+      }
+      renderStates(snapshot);
+      renderImportantData(snapshot);
+      latestLogs = Array.isArray(snapshot.logs) ? snapshot.logs.slice(0, 2000) : [];
+      if (!loggerPaused) {
+        elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
+        elements.logWindow.scrollTop = 0;
+      }
+      elements.serialPort.value = snapshot.config.serial_port;
+      elements.wifiSsid.value = snapshot.config.wifi_ssid;
+      elements.wifiPassword.value = snapshot.config.wifi_password;
+      elements.serverIp.value = snapshot.config.server_ip;
+      elements.serverPort.value = snapshot.config.server_port;
+      elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms;
+      elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms;
+      elements.keepaliveMs.value = snapshot.config.keepalive_period_ms;
+    }
+
+    async function refresh() {
+      try {
+        render(await snapshot());
+      } catch (error) {
+        setFlash(error.message, true);
+      }
+    }
+
+    async function post(url, body, button = null) {
+      const targetState = button ? commandStateMap[button.id] : null;
+      if (button) {
+        resetAsyncButtonStates(button);
+        setButtonState(button, 'pending');
+      }
+      if (targetState) {
+        setStateVisual(targetState, 'progress');
+        renderStates({ available_states: Object.keys(stateVisuals), current_state: targetState });
+      }
+      try {
+        const payload = await callJson(
+          url,
+          body
+            ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+            : { method: 'POST' }
+        );
+        resetStateVisuals(payload);
+        if (targetState) {
+          setStateVisual(targetState, payload.last_error ? 'failure' : 'success');
+        }
+        render(payload);
+        setFlashFromSnapshot(payload, `Updated via ${url}.`);
+      } catch (error) {
+        setFlash(error.message, true);
+        if (targetState) {
+          setStateVisual(targetState, 'failure');
+          renderStates({ available_states: Object.keys(stateVisuals), current_state: targetState });
+        }
+      } finally {
+        if (button) {
+          clearButtonState(button);
+        }
+      }
+    }
+
+    elements.navOperational.addEventListener('click', () => activateWindow('operational'));
+    elements.navImportantData.addEventListener('click', () => activateWindow('important-data'));
+    elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
+    elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
+    elements.applyConfigButton.addEventListener('click', () => post('/api/config', {
+      serial_port: elements.serialPort.value.trim() || 'COM4',
+      wifi_ssid: elements.wifiSsid.value.trim(),
+      wifi_password: elements.wifiPassword.value,
+      server_ip: elements.serverIp.value.trim(),
+      server_port: Number(elements.serverPort.value || 3333),
+      wifi_connect_timeout_ms: Number(elements.wifiTimeout.value || 10000),
+      tcp_connect_timeout_ms: Number(elements.tcpTimeout.value || 3000),
+      keepalive_period_ms: Number(elements.keepaliveMs.value || 100),
+    }, elements.applyConfigButton));
+    elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
+    elements.initializeButton.addEventListener('click', () => post('/api/command/initialize', null, elements.initializeButton));
+    elements.connectButton.addEventListener('click', () => post('/api/command/connect', null, elements.connectButton));
+    elements.disconnectButton.addEventListener('click', () => post('/api/command/disconnect', null, elements.disconnectButton));
+    elements.keepaliveButton.addEventListener('click', () => post('/api/command/keepalive', null, elements.keepaliveButton));
+    elements.loggerToggleButton.addEventListener('click', () => {
+      loggerPaused = !loggerPaused;
+      syncLoggerToggle();
+      if (!loggerPaused) {
+        elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
+        elements.logWindow.scrollTop = 0;
+      }
+    });
+
+    activateWindow('operational');
+    syncLoggerToggle();
+    refresh();
+    setInterval(refresh, 1000);
   </script>
 </body>
 </html>

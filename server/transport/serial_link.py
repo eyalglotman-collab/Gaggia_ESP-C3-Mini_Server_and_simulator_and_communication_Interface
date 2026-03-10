@@ -50,7 +50,7 @@ class SerialLinkManager:
         self._reader_running = False
         self._rx_buffer = bytearray()
         self._rx_frames: deque[Frame] = deque()
-        self._logs: deque[str] = deque(maxlen=400)
+        self._logs: deque[str] = deque(maxlen=2000)
         self._port_name = port_name or os.getenv("SIM_SERIAL_PORT", "COM4")
         self._baud_rate = baud_rate
         self._protocol = "ESP32-C3 Framed Serial Link"
@@ -66,10 +66,11 @@ class SerialLinkManager:
         self._log(f"Transport manager initialized for {self._port_name} @ {self._baud_rate}.")
 
     def _timestamp(self) -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+        now = datetime.now(UTC)
+        return f"{now:%H:%M:%S}.{now.microsecond // 10000:02d}"
 
     def _log(self, message: str) -> None:
-        self._logs.append(f"[{self._timestamp()}] {message}")
+        self._logs.appendleft(f"[{self._timestamp()}] {message}")
 
     def _set_event(self, message: str, error: str = "") -> None:
         self._last_event = message

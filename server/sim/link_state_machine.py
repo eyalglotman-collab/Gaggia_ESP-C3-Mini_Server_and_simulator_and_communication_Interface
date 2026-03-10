@@ -71,7 +71,7 @@ class LinkRuntime:
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._logs: deque[str] = deque(maxlen=400)
+        self._logs: deque[str] = deque(maxlen=2000)
         self._current_state = LinkState.RESET
         self._config = TransportConfig()
         self._last_transition_at = self._timestamp()
@@ -92,10 +92,23 @@ class LinkRuntime:
         self._append_log("Transport runtime ready. Default state is reset.")
 
     def _timestamp(self) -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+        now = datetime.now(UTC)
+        return f"{now:%H:%M:%S}.{now.microsecond // 10000:02d}"
 
     def _append_log(self, message: str) -> None:
-        self._logs.append(f"[{self._timestamp()}] {message}")
+        self._logs.appendleft(f"[{self._timestamp()}] {message}")
+
+    def _combined_logs_locked(self) -> list[str]:
+        """@brief Return the UI logger feed in newest-to-oldest order.
+
+        @details Both runtime logs and serial-manager logs are stored with the
+        newest entry first. The UI logger is capped to the last 2000 messages
+        across both sources so the browser keeps a bounded rolling history.
+        """
+
+        combined_logs = list(self._logs) + serial_link_manager.get_logs()
+        combined_logs.sort(reverse=True)
+        return combined_logs[:2000]
 
     def _set_state(self, state: LinkState, message: str, error: str = "") -> None:
         self._current_state = state
@@ -411,7 +424,6 @@ class LinkRuntime:
             "Last TX": transport_snapshot.last_tx_at,
             "Last Error": self._last_error or transport_snapshot.last_error or "None",
         }
-        combined_logs = list(self._logs) + serial_link_manager.get_logs()[-100:]
         return LinkSnapshot(
             current_state=self._current_state.value,
             serial_port=self._config.serial_port,
@@ -424,7 +436,7 @@ class LinkRuntime:
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
             transport=asdict(transport_snapshot),
-            logs=combined_logs[-250:],
+            logs=self._combined_logs_locked(),
             available_states=[state.value for state in LinkState],
         )
 

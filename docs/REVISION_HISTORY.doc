@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.1\par
-- Summary: Added the first dark hi-tech simulator operator UI, state workflow, synthetic transport and telemetry, local run helper, API tests, and repaired programmatic docx generation.\par
+- Version: 0.1.4\par
+- Summary: Expanded the simulator transport UI, documented the updated launch/workflow rules, and refined logger/state display behavior.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-10 15:26:00\b0\par
+- Version: 0.1.4\par
+- Summary: Refined the simulator operator UI and completed revision-control documentation for the current workflow.\par
+- Notes: Added two-window simulator UI structure, widened the operational view, improved logger behavior and pause handling, updated timestamp formatting to HH:MM:SS.kk in runtime logs, documented UI color/state behavior in the detailed design, and added README workflow rules for launch order, browser cache bypass, revision-history requirements, and task-completeness checks.\par
+- Resolved Defects:\par
+  - UI-20260310-1: Simulator browser sessions could show stale frontend assets because the browser was opened without explicit cache bypass after backend relaunch.\par
+  - UI-20260310-2: Simulator logger ordering and retention behavior did not keep newest entries at the top with bounded rolling memory.\par
+\par
 \b 2026-03-08\b0\par
 - Version: 0.1.1\par
 - Summary: Added the first functional backend simulator workflow and release-quality local tooling.\par
