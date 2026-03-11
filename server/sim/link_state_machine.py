@@ -84,6 +84,7 @@ class LinkRuntime:
         self._last_valid_rx: datetime | None = None
         self._connect_requested_at: datetime | None = None
         self._keepalive_ack_pending = False
+        self._pending_auto_stage: LinkState | None = None
         self._last_error = ""
         self._last_monitor_event = "Simulator monitor ready."
         self._last_monitor_at = self._timestamp()
@@ -133,6 +134,7 @@ class LinkRuntime:
         self._connect_requested_at = None
         self._keepalive_ack_pending = False
         self._send_data_enabled = False
+        self._pending_auto_stage = None
 
     def _set_error(self, message: str) -> None:
         """@brief Latch an error and move the low-level runtime into `error`.
@@ -145,6 +147,90 @@ class LinkRuntime:
         self._tcp_connected = False
         self._wifi_connected = False
         self._set_state(LinkState.ERROR, "Transport fault latched.", message)
+
+    def _try_send_command_locked(
+        self,
+        message_type: MessageType,
+        payload_text: str,
+        failure_prefix: str,
+    ) -> bool:
+        """@brief Send one command and convert transport failures into `error`.
+
+        @details This helper keeps the API snapshot-based even when COM writes
+        fail, so the operator sees the stage-specific fault reason in the UI.
+        """
+
+        try:
+            self._send_command_locked(message_type, payload_text)
+        except RuntimeError as exc:
+            self._set_error(f"{failure_prefix}: {exc}")
+            return False
+        return True
+
+    def _begin_initialize_locked(self, reason: str) -> None:
+        """@brief Start the initialize stage of the automatic controller flow.
+
+        @details This stage validates configuration, loads the ESP controller
+        with mirrored constants, and schedules the automatic connect step.
+        """
+
+        config_error = self._validate_config_locked()
+        if config_error is not None:
+            self._set_error(config_error)
+            return
+        if not serial_link_manager.get_snapshot().port_open:
+            self._set_error("COM port not found")
+            return
+
+        self._wifi_ready = True
+        self._wifi_connected = False
+        self._tcp_connected = False
+        self._bridge_ready = True
+        self._set_state(LinkState.INITIALIZE, reason)
+        if not self._try_send_command_locked(
+            MessageType.INITIALIZE,
+            self._build_initialize_payload(),
+            "initialize transmit failed",
+        ):
+            return
+        self._pending_auto_stage = LinkState.CONNECT
+
+    def _begin_connect_locked(self, reason: str) -> None:
+        """@brief Start the connect stage after initialize has completed.
+
+        @details Connect is automatically entered by the server runtime once
+        the mirrored constants were sent successfully to the ESP controller.
+        """
+
+        if not self._wifi_ready:
+            self._set_error("initialize did not complete before connect")
+            return
+        if not self._try_send_command_locked(
+            MessageType.CONNECT,
+            f"server={self._config.server_ip}:{self._config.server_port}",
+            "connect transmit failed",
+        ):
+            return
+        self._pending_auto_stage = None
+        self._connect_requested_at = datetime.now(UTC)
+        self._wifi_connected = True
+        self._tcp_connected = False
+        self._set_state(LinkState.CONNECT, reason)
+
+    def _advance_automatic_flow_locked(self) -> None:
+        """@brief Progress the automatic reset-to-keepalive sequence.
+
+        @details The runtime advances one stage per snapshot poll so the UI can
+        observe reset, initialize, and connect as distinct server states.
+        """
+
+        if self._current_state is LinkState.ERROR:
+            return
+        if self._current_state is LinkState.RESET and self._pending_auto_stage is LinkState.INITIALIZE:
+            self._begin_initialize_locked("Automatic progression entered initialize.")
+            return
+        if self._current_state is LinkState.INITIALIZE and self._pending_auto_stage is LinkState.CONNECT:
+            self._begin_connect_locked("Initialize completed. Waiting for connect response.")
 
     def note_monitor_event(self, category: str, message: str, *, throttle_snapshot: bool = False) -> None:
         """@brief Record a monitor-visible event into the runtime log stream.
@@ -251,6 +337,7 @@ class LinkRuntime:
             ):
                 self._connect_requested_at = None
                 self._keepalive_ack_pending = False
+                self._pending_auto_stage = None
                 self._send_data_enabled = True
                 self._set_state(
                     LinkState.KEEPALIVE,
@@ -406,8 +493,15 @@ class LinkRuntime:
             self._wifi_ready = False
             self._wifi_connected = False
             self._tcp_connected = False
-            self._send_command_locked(MessageType.RESET, "reset")
+            self._bridge_ready = False
             self._set_state(LinkState.RESET, "Server reset issued. Transmission stopped and buffers cleared.")
+            if not self._try_send_command_locked(
+                MessageType.RESET,
+                "reset",
+                "reset transmit failed",
+            ):
+                return self._snapshot_locked()
+            self._pending_auto_stage = LinkState.INITIALIZE
             return self._snapshot_locked()
 
     def initialize(self) -> LinkSnapshot:
@@ -424,30 +518,8 @@ class LinkRuntime:
             if self._current_state is LinkState.ERROR:
                 self._append_log("Initialize ignored because reset is required to clear the latched error.")
                 return self._snapshot_locked()
-            config_error = self._validate_config_locked()
-            if config_error is not None:
-                self._set_error(config_error)
-                return self._snapshot_locked()
-            if not serial_link_manager.get_snapshot().port_open:
-                self._set_error("COM port not found")
-                return self._snapshot_locked()
-            self._wifi_ready = True
-            self._wifi_connected = False
-            self._tcp_connected = False
-            self._bridge_ready = True
             self._clear_runtime_flow_locked()
-            self._send_command_locked(MessageType.INITIALIZE, self._build_initialize_payload())
-            self._send_command_locked(
-                MessageType.CONNECT,
-                f"server={self._config.server_ip}:{self._config.server_port}",
-            )
-            self._connect_requested_at = datetime.now(UTC)
-            self._wifi_connected = True
-            self._tcp_connected = False
-            self._set_state(
-                LinkState.CONNECT,
-                "Initialize loaded the ESP controller and automatically entered connect wait.",
-            )
+            self._begin_initialize_locked("Initialize command started automatic controller loading.")
             return self._snapshot_locked()
 
     def send_keepalive(self) -> LinkSnapshot:
@@ -466,7 +538,12 @@ class LinkRuntime:
                 self._set_error("keepalive requires an active connection")
                 return self._snapshot_locked()
             self._host_live_integer += 1
-            self._send_command_locked(MessageType.KEEPALIVE, "keepalive")
+            if not self._try_send_command_locked(
+                MessageType.KEEPALIVE,
+                "keepalive",
+                "keepalive transmit failed",
+            ):
+                return self._snapshot_locked()
             self._last_keepalive_tx = datetime.now(UTC)
             self._keepalive_ack_pending = True
             self._watchdog_armed = True
@@ -490,13 +567,19 @@ class LinkRuntime:
             if not self._send_data_enabled or self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
                 self._set_error("send data requires keepalive-ready connection")
                 return self._snapshot_locked()
-            self._send_command_locked(MessageType.DATA, "espresso_payload")
+            if not self._try_send_command_locked(
+                MessageType.DATA,
+                "espresso_payload",
+                "send data transmit failed",
+            ):
+                return self._snapshot_locked()
             self._set_state(LinkState.SEND_DATA, "Send-data command issued.")
             return self._snapshot_locked()
 
     def get_snapshot(self) -> LinkSnapshot:
         with self._lock:
             self._poll_received_frames_locked()
+            self._advance_automatic_flow_locked()
             self._evaluate_watchdog_locked()
             return self._snapshot_locked()
 

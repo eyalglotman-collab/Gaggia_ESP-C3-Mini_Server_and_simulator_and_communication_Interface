@@ -83,8 +83,8 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 | State | Purpose | Entry Actions | Exit Conditions |
 | --- | --- | --- | --- |
-| `reset` | Stop transmission, clear buffers, and re-initialize the ESP controller. | Clear counters, buffers, stale link ownership, and active supervision before issuing `RESET`. | Reset complete and parameters available for initialize. |
-| `initialize` | Load the ESP controller with mirrored transport constants. | Validate mirrored COM/Wi-Fi/TCP configuration, send Wi-Fi/server constants, then automatically issue `CONNECT`. | Automatic hand-off into `connect`, or immediate fault occurs. |
+| `reset` | Stop transmission, clear buffers, and re-initialize the ESP controller. | Clear counters, buffers, stale link ownership, and active supervision before issuing `RESET`, then arm automatic progression into `initialize`. | Reset-send succeeds and automatic initialize can begin, or a reset fault occurs. |
+| `initialize` | Load the ESP controller with mirrored transport constants. | Validate mirrored COM/Wi-Fi/TCP configuration and send Wi-Fi/server constants. | Automatic hand-off into `connect`, or immediate fault occurs. |
 | `connect` | Wait for the ESP controller to acknowledge the active connection. | Hold the mirrored Wi-Fi-ready/connect-attempt context while waiting for `connect_ack` or equivalent progress. | Connect response succeeds and promotes to `keepalive`, or timeout/fault occurs. |
 | `keepalive` | Supervise the active low-level connection. | Exchange liveness traffic, advance `HostLiveInteger`, and watch for missed responses. | Data traffic is enabled or keepalive supervision fails. |
 | `send_data` | Allow application payload traffic on the active low-level connection. | Send validated `DATA` frames while the keepalive path remains healthy. | Operator resumes keepalive focus or a supervision fault occurs. |
@@ -94,8 +94,9 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 | Current State | Trigger | Guard / Condition | Action | Next State | Timeout / Failure Behavior |
 | --- | --- | --- | --- | --- | --- |
-| `reset` | Reset command | Operator requests hard recovery or fresh start | Stop transmission, clear buffers, and issue `RESET` to the ESP controller | `reset` | Reset-send failure moves to `error`. |
-| `reset` | Initialize command | COM is available and mirrored Wi-Fi/TCP configuration is coherent | Send transport constants and automatically issue `CONNECT` | `connect` | Validation, COM availability, or bridge bring-up failure moves to `error`. |
+| `reset` | Reset command | Operator requests hard recovery or fresh start | Stop transmission, clear buffers, issue `RESET` to the ESP controller, and arm automatic initialize | `reset` | Reset-send failure moves to `error`. |
+| `reset` | Automatic progression | Reset completed and the runtime still owns a valid transport path | Send mirrored transport constants to the ESP controller | `initialize` | Validation, COM availability, or initialize transmit failure moves to `error`. |
+| `initialize` | Automatic progression | Mirrored constants were sent successfully | Automatically issue `CONNECT` and wait for the ESP response | `connect` | Connect transmit failure moves to `error`. |
 | `connect` | Connect response received | `connect_ack`, `KEEPALIVE`, or `DATA` progress arrives in time | Enable keepalive supervision and send-data path | `keepalive` | Connect timeout or malformed response moves to `error`. |
 | `keepalive` | Send Data command | Connect success already enabled payload traffic | Send `DATA` frame while supervision remains active | `send_data` | Payload attempt before connect success moves to `error`. |
 | `keepalive` | Fault detected | Keepalive timeout, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit reset. |

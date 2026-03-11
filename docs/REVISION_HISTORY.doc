@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.10\par
-- Summary: Reworked the server transport flow into reset, initialize, connect, keepalive, send-data, and reset-only error recovery with aligned UI and shared interface extraction.\par
+- Version: 0.1.11\par
+- Summary: Made reset automatically progress through initialize and connect toward keepalive, with stage-specific error latching at every failure point.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 16:40:00\b0\par
+- Version: 0.1.11\par
+- Firmware Version: 0.1.11\par
+- Summary: Converted the server transport runtime from operator-stepped progression into an automatic reset-to-keepalive sequencer.\par
+- Notes: Reset now clears buffered traffic, sends RESET, and arms automatic initialize progression; the runtime advances one stage at a time through initialize and connect during snapshot polling so the UI can observe the transition path; connect success automatically promotes the runtime to keepalive and enables send-data; command transmit failures now latch explicit stage-specific error text instead of surfacing only as raw request failures; the transport contract and detailed design were updated to describe the automatic server-state sequencing.\par
+- Resolved Defects:\par
+  - FLOW-20260311-2: After reset, the simulator remained in reset until the operator manually invoked initialize instead of progressing automatically toward keepalive.\par
+\par
 \b 2026-03-11 16:20:00\b0\par
 - Version: 0.1.10\par
 - Firmware Version: 0.1.10\par

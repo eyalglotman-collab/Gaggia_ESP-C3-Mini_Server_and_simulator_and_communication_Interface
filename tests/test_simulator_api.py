@@ -24,6 +24,24 @@ def _reset_runtime_for_test() -> None:
         link_runtime._clear_runtime_flow_locked()  # noqa: SLF001
 
 
+def _open_transport_snapshot() -> SerialLinkSnapshot:
+    return SerialLinkSnapshot(
+        port_name='COM4',
+        baud_rate=115200,
+        port_open=True,
+        protocol='ESP32-C3 Framed Serial Link',
+        last_event_at='2026-03-11 00:00:00Z',
+        last_event='Opened serial port COM4 @ 115200.',
+        last_error='',
+        last_tx_at='Never',
+        last_rx_at='Never',
+        tx_frames=0,
+        rx_frames=0,
+        tx_bytes=0,
+        rx_bytes=0,
+    )
+
+
 def test_health_endpoint() -> None:
     client = TestClient(app)
     response = client.get('/health')
@@ -254,33 +272,81 @@ def test_initialize_automatically_enters_connect_state(monkeypatch) -> None:
 
     monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
     monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
-    monkeypatch.setattr(
-        serial_link_manager,
-        'get_snapshot',
-        lambda: SerialLinkSnapshot(
-            port_name='COM4',
-            baud_rate=115200,
-            port_open=True,
-            protocol='ESP32-C3 Framed Serial Link',
-            last_event_at='2026-03-11 00:00:00Z',
-            last_event='Opened serial port COM4 @ 115200.',
-            last_error='',
-            last_tx_at='Never',
-            last_rx_at='Never',
-            tx_frames=0,
-            rx_frames=0,
-            tx_bytes=0,
-            rx_bytes=0,
-        ),
-    )
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
     monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
 
     response = client.post('/api/command/initialize')
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload['current_state'] == 'connect'
+    assert payload['current_state'] == 'initialize'
     assert payload['important_data']['Send Data Enabled'] == 'No'
+
+    snapshot_response = client.get('/api/link')
+    assert snapshot_response.status_code == 200
+    assert snapshot_response.json()['current_state'] == 'connect'
+
+
+def test_reset_automatically_progresses_into_initialize_and_connect(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    reset_response = client.post('/api/command/reset')
+    assert reset_response.status_code == 200
+    assert reset_response.json()['current_state'] == 'reset'
+
+    initialize_snapshot = client.get('/api/link')
+    assert initialize_snapshot.status_code == 200
+    assert initialize_snapshot.json()['current_state'] == 'initialize'
+
+    connect_snapshot = client.get('/api/link')
+    assert connect_snapshot.status_code == 200
+    assert connect_snapshot.json()['current_state'] == 'connect'
+
+
+def test_connect_ack_automatically_promotes_runtime_to_keepalive(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    rx_batches = [
+        [],
+        [],
+        [
+            Frame(
+                message_type=MessageType.ACK,
+                host_live_integer=0,
+                device_live_integer=1,
+                sequence=2,
+                payload=b'connect_ack',
+            )
+        ],
+    ]
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(
+        serial_link_manager,
+        'pop_received_frames',
+        lambda: rx_batches.pop(0) if rx_batches else [],
+    )
+
+    client.post('/api/command/reset')
+    client.get('/api/link')
+    client.get('/api/link')
+    keepalive_snapshot = client.get('/api/link')
+
+    assert keepalive_snapshot.status_code == 200
+    payload = keepalive_snapshot.json()
+    assert payload['current_state'] == 'keepalive'
+    assert payload['important_data']['Send Data Enabled'] == 'Yes'
 
 
 def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
