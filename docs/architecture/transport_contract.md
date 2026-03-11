@@ -161,6 +161,7 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 - Server-state indications must appear in a dedicated titled group box named `Server States`.
 - Command controls and server-state indications must remain visually distinct so actions are not confused with state reporting.
 - The logger panel should remain separate from the server-state group and continue to display the latest rolling transport history.
+- All editable text controls in the simulator UI must use a bright fill with a light visible frame so operators can immediately distinguish writable fields from static text surfaces.
 
 ## Simulator Runtime Error Mapping
 

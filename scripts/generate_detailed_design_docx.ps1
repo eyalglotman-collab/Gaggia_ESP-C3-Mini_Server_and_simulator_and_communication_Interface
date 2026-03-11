@@ -752,6 +752,7 @@ $bodyItems = @(
     "  red = finished with failure"
     "  light green = finished with success"
     "Grouping Rule: server-state indication shall be shown in a dedicated titled group box named Server States so state reporting remains visually separate from operator commands."
+    "Editable Text Rule: all editable text controls in the simulator UI shall use a bright fill with a light visible frame so writable fields are visually distinct from static text boxes."
     "Logger Rule: the logger remains a separate rolling history surface and is not itself a machine-state indicator."
     ""
     "13. Notes"

@@ -436,19 +436,24 @@
       width:100%;
       min-height:34px;
       border-radius:10px;
-      border:1px solid rgba(201, 220, 232, .38);
-      background:linear-gradient(180deg, rgba(228, 238, 245, .24), rgba(196, 214, 226, .16));
-      color:#f3f8fc;
+      border:1px solid rgba(231, 241, 248, .88);
+      background:linear-gradient(180deg, rgba(247, 252, 255, .96), rgba(223, 236, 245, .9));
+      color:#122533;
       padding:0 11px;
       font-size:.88rem;
       outline:none;
-      box-shadow:inset 0 1px 0 rgba(255, 255, 255, .18);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, .2),
+        inset 0 1px 0 rgba(255, 255, 255, .92);
     }
 
     input:focus {
-      border-color:rgba(109, 178, 255, .72);
-      box-shadow:0 0 0 3px rgba(45, 140, 255, .14), inset 0 1px 0 rgba(255, 255, 255, .24);
-      background:linear-gradient(180deg, rgba(236, 244, 250, .28), rgba(210, 225, 236, .18));
+      border-color:rgba(120, 198, 255, .98);
+      box-shadow:
+        0 0 0 3px rgba(98, 192, 255, .24),
+        0 0 18px rgba(142, 215, 255, .16),
+        inset 0 1px 0 rgba(255, 255, 255, .98);
+      background:linear-gradient(180deg, rgba(255, 255, 255, .99), rgba(232, 243, 250, .96));
     }
 
     button {
@@ -627,13 +632,26 @@
       min-height:84px;
       resize:vertical;
       border-radius:12px;
-      border:1px solid rgba(151, 180, 201, .14);
-      background:rgba(14, 24, 33, .88);
-      color:#eef4f8;
+      border:1px solid rgba(231, 241, 248, .88);
+      background:linear-gradient(180deg, rgba(247, 252, 255, .96), rgba(223, 236, 245, .9));
+      color:#122533;
       padding:10px 12px;
       font-family:"Segoe UI", "Helvetica Neue", sans-serif;
       font-size:.8rem;
       line-height:1.28;
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, .2),
+        inset 0 1px 0 rgba(255, 255, 255, .92);
+    }
+
+    .payload-box textarea:focus {
+      outline:none;
+      border-color:rgba(120, 198, 255, .98);
+      box-shadow:
+        0 0 0 3px rgba(98, 192, 255, .24),
+        0 0 18px rgba(142, 215, 255, .16),
+        inset 0 1px 0 rgba(255, 255, 255, .98);
+      background:linear-gradient(180deg, rgba(255, 255, 255, .99), rgba(232, 243, 250, .96));
     }
 
     .received-box {

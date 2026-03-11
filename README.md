@@ -144,6 +144,7 @@
 - Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
 - For every instruction from Eyal, Codex must read the full text carefully, derive the complete set of concrete tasks implied by that instruction, execute all of them, and verify before responding that every identified task was actually followed up and finished.
 - UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
+- Editable text rule: all editable text controls in the simulator UI must use a bright color box with a light visible frame so writable fields are immediately distinguishable from static text boxes.
 - Simulator UI interaction rule:
   - command buttons use blue as the default unpressed color
   - when a command button is pressed it must turn gray and look pressed while the related state/action is still in progress
