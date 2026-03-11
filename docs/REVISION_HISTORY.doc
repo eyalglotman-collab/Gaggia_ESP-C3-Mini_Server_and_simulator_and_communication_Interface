@@ -2,10 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.6\par
-- Summary: Standardized PowerShell script documentation, added comment best-practice rules, and versioned the documentation cleanup.\par
+- Version: 0.1.7\par
+- Summary: Simplified the simulator launcher flow to close the temporary shell and leave only the backend host visible.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 13:56:00\b0\par
+- Version: 0.1.7\par
+- Summary: Simplified the simulator launcher window flow and versioned the startup-behavior fix.\par
+- Notes: Removed the extra launcher console from the standard-user batch flow, changed the temporary PowerShell handoff to close automatically after startup, kept installation verification and browser prompting in the launcher phase, and updated the README plus detailed design so the documented launch contract matches the actual single-temporary-shell behavior.\par
+- Resolved Defects:\par
+  - LAUNCH-20260311-1: The standard-user simulator launcher left an unnecessary PowerShell prompt window open after backend startup completed.\par
+\par
 \b 2026-03-11 11:59:47\b0\par
 - Version: 0.1.6\par
 - Summary: Standardized simulator script documentation and comment rules.\par
