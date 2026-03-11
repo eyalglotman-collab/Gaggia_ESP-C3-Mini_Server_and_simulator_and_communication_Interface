@@ -120,7 +120,7 @@
   - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
   - from now on, launch the simulator the same way a standard user would: start from `scripts\run_simulator.bat` unless a lower-level script is being edited or debugged directly
-  - `scripts\run_simulator.bat` shall open one visible PowerShell host for the manual-launch flow and must not cascade into multiple visible PowerShell windows
+  - `scripts\run_simulator.bat` shall hand off directly into one visible PowerShell session for the manual-launch flow and must not cascade into additional console or PowerShell windows
   - `scripts\launch_simulator_ui.ps1` shall run installation verification inside that same launcher host, then start the backend and ask whether to open the UI in a fresh browser session
   - if installation verification finds any missing component or version mismatch, show a popup with the gaps and stop instead of continuing to startup
   - launch the repository `.venv`-backed Python application through the deterministic repo-local launcher `scripts\run_simulator.ps1`

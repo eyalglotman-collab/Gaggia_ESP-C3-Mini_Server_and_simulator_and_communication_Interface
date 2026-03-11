@@ -3,10 +3,10 @@
 Starts the simulator backend and offers to open the UI in a browser.
 
 .DESCRIPTION
-Launches the canonical backend runner in a dedicated PowerShell host, waits for
-the simulator health endpoint to report ready, and then shows a Yes/No message
-box asking whether to open the simulator in a fresh browser session using a
-cache-busting URL.
+Runs the manual-launch flow inside the single PowerShell session opened by the
+batch wrapper, waits for the simulator health endpoint to report ready, and
+then shows a Yes/No message box asking whether to open the simulator in a fresh
+browser session using a cache-busting URL.
 
 .PARAMETER HostName
 Bind address for the simulator backend.
