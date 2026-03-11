@@ -587,6 +587,55 @@
       border-color:rgba(255, 127, 157, .9);
     }
 
+    .connection-integers {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:6px;
+      margin-top:8px;
+    }
+
+    .connection-integer {
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(14, 24, 33, .88);
+    }
+
+    .connection-integer .k {
+      font-size:.58rem;
+      letter-spacing:.09em;
+      color:#9aafc1;
+      text-transform:uppercase;
+    }
+
+    .connection-integer .v {
+      margin-top:4px;
+      font-size:.95rem;
+      line-height:1;
+      color:#eef4f8;
+      font-weight:700;
+    }
+
+    .payload-box {
+      margin-top:8px;
+      display:grid;
+      gap:6px;
+    }
+
+    .payload-box textarea {
+      width:100%;
+      min-height:84px;
+      resize:vertical;
+      border-radius:12px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(14, 24, 33, .88);
+      color:#eef4f8;
+      padding:10px 12px;
+      font-family:"Segoe UI", "Helvetica Neue", sans-serif;
+      font-size:.8rem;
+      line-height:1.28;
+    }
+
     .logger-panel {
       min-height:520px;
       max-height:520px;
@@ -852,7 +901,7 @@
                     <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
                   </div>
                   <div class="row" style="margin-top:10px">
-                    <div style="flex:1 1 220px"></div>
+                    <div style="flex:1 1 220px" class="section-copy">Profile overwrites live transport values as you edit.</div>
                     <button id="applyConfigButton" type="button">Apply Transport Config</button>
                   </div>
                 </section>
@@ -888,6 +937,10 @@
                     <button id="keepaliveButton" type="button">Keepalive</button>
                     <button id="sendDataButton" type="button">Send Data</button>
                   </div>
+                  <div class="payload-box">
+                    <div class="label">Send Data Payload</div>
+                    <textarea id="sendDataPayload">Ada Lovelace is widely regarded as one of the first computer programmers.</textarea>
+                  </div>
                 </section>
 
                 <section class="panel stack">
@@ -898,6 +951,16 @@
                     </div>
                   </div>
                   <div id="states" class="states"></div>
+                  <div id="connectionIntegers" class="connection-integers">
+                    <div class="connection-integer">
+                      <div class="k">Sent By Server</div>
+                      <div id="serverConnectionInteger" class="v">0</div>
+                    </div>
+                    <div class="connection-integer">
+                      <div class="k">Received From Client</div>
+                      <div id="clientConnectionInteger" class="v">0</div>
+                    </div>
+                  </div>
                 </section>
               </div>
 
@@ -962,6 +1025,7 @@
       initializeButton: document.getElementById('initializeButton'),
       keepaliveButton: document.getElementById('keepaliveButton'),
       sendDataButton: document.getElementById('sendDataButton'),
+      sendDataPayload: document.getElementById('sendDataPayload'),
       loggerToggleButton: document.getElementById('loggerToggleButton'),
       navOperational: document.getElementById('navOperational'),
       navLifecycle: document.getElementById('navLifecycle'),
@@ -972,6 +1036,8 @@
       windowImportantData: document.getElementById('windowImportantData'),
       workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
+      serverConnectionInteger: document.getElementById('serverConnectionInteger'),
+      clientConnectionInteger: document.getElementById('clientConnectionInteger'),
       importantData: document.getElementById('importantData'),
       logWindow: document.getElementById('logWindow'),
       flash: document.getElementById('flash'),
@@ -993,6 +1059,19 @@
     let latestLogs = [];
     let loggerPaused = false;
     let stateVisuals = {};
+    let configSyncTimer = null;
+    const wikiSentences = [
+      'The printing press accelerated the spread of scientific ideas across Europe.',
+      'The Nile River supported dense agricultural settlements in ancient Egypt.',
+      'The periodic table organizes elements by atomic number and recurring chemical properties.',
+      'The Internet emerged from packet-switching research funded in the late twentieth century.',
+      'Plate tectonics explains the motion of Earths lithospheric plates over geologic time.',
+      'Photosynthesis converts light energy into chemical energy stored in glucose.',
+      'The Library of Alexandria became a lasting symbol of accumulated knowledge.',
+      'Antibiotics transformed modern medicine by allowing bacterial infections to be treated effectively.',
+      'The steam engine played a central role in the Industrial Revolution.',
+      'Saturn is known for its extensive ring system composed mostly of ice particles.',
+    ];
 
     const asyncButtons = ['openButton', 'closeButton', 'applyConfigButton', 'resetButton', 'initializeButton', 'keepaliveButton', 'sendDataButton'];
     const commandStateMap = {
@@ -1011,6 +1090,23 @@
 
     async function snapshot() {
       return callJson('/api/link');
+    }
+
+    function randomWikiSentence() {
+      return wikiSentences[Math.floor(Math.random() * wikiSentences.length)];
+    }
+
+    function collectConfigPayload() {
+      return {
+        serial_port: elements.serialPort.value.trim() || 'COM4',
+        wifi_ssid: elements.wifiSsid.value.trim(),
+        wifi_password: elements.wifiPassword.value,
+        server_ip: elements.serverIp.value.trim(),
+        server_port: Number(elements.serverPort.value || 3333),
+        wifi_connect_timeout_ms: Number(elements.wifiTimeout.value || 10000),
+        tcp_connect_timeout_ms: Number(elements.tcpTimeout.value || 3000),
+        keepalive_period_ms: Number(elements.keepaliveMs.value || 100),
+      };
     }
 
     function setChipState(element, tone, label) {
@@ -1056,8 +1152,8 @@
 
     function setFlashFromSnapshot(snapshot, fallback = 'Updated.') {
       const transport = snapshot.transport || {};
-      const message = transport.last_error || transport.last_event || fallback;
-      setFlash(message, Boolean(transport.last_error));
+      const message = snapshot.last_error || transport.last_error || transport.last_event || fallback;
+      setFlash(message, Boolean(snapshot.last_error || transport.last_error));
     }
 
     function syncLoggerToggle() {
@@ -1175,6 +1271,16 @@
       });
     }
 
+    function renderConnectionIntegers(snapshot) {
+      elements.serverConnectionInteger.textContent = String(snapshot.host_live_integer ?? 0);
+      elements.clientConnectionInteger.textContent = String(snapshot.device_live_integer ?? 0);
+    }
+
+    function syncInputValue(input, value) {
+      if (document.activeElement === input) return;
+      input.value = String(value ?? '');
+    }
+
     function updateSummary(snapshot) {
       const transport = snapshot.transport || {};
 
@@ -1186,8 +1292,9 @@
     }
 
     function render(snapshot) {
-      if (!Object.keys(stateVisuals).length) resetStateVisuals(snapshot);
+      resetStateVisuals(snapshot);
       renderStates(snapshot);
+      renderConnectionIntegers(snapshot);
       renderImportantData(snapshot);
 
       latestLogs = Array.isArray(snapshot.logs) ? snapshot.logs.slice(0, 2000) : [];
@@ -1196,18 +1303,20 @@
         elements.logWindow.scrollTop = 0;
       }
 
-      elements.serialPort.value = snapshot.config.serial_port;
-      elements.wifiSsid.value = snapshot.config.wifi_ssid;
-      elements.wifiPassword.value = snapshot.config.wifi_password;
-      elements.serverIp.value = snapshot.config.server_ip;
-      elements.serverPort.value = snapshot.config.server_port;
-      elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms;
-      elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms;
-      elements.keepaliveMs.value = snapshot.config.keepalive_period_ms;
-      elements.keepaliveButton.disabled = !['keepalive', 'send_data'].includes(snapshot.current_state);
-      elements.sendDataButton.disabled = snapshot.important_data['Send Data Enabled'] !== 'Yes';
+      syncInputValue(elements.serialPort, snapshot.config.serial_port);
+      syncInputValue(elements.wifiSsid, snapshot.config.wifi_ssid);
+      syncInputValue(elements.wifiPassword, snapshot.config.wifi_password);
+      syncInputValue(elements.serverIp, snapshot.config.server_ip);
+      syncInputValue(elements.serverPort, snapshot.config.server_port);
+      syncInputValue(elements.wifiTimeout, snapshot.config.wifi_connect_timeout_ms);
+      syncInputValue(elements.tcpTimeout, snapshot.config.tcp_connect_timeout_ms);
+      syncInputValue(elements.keepaliveMs, snapshot.config.keepalive_period_ms);
+      const connectPassed = snapshot.important_data['Connect Passed'] === 'Yes';
+      elements.keepaliveButton.disabled = !connectPassed || !['keepalive', 'send_data'].includes(snapshot.current_state);
+      elements.sendDataButton.disabled = !connectPassed || snapshot.important_data['Send Data Enabled'] !== 'Yes';
 
       updateSummary(snapshot);
+      setFlashFromSnapshot(snapshot, 'Transport snapshot updated.');
     }
 
     async function refresh() {
@@ -1237,7 +1346,6 @@
         resetStateVisuals(payload);
         if (targetState) setStateVisual(targetState, payload.last_error ? 'failure' : 'success');
         render(payload);
-        setFlashFromSnapshot(payload, `Updated via ${url}.`);
         if (button) {
           setButtonState(button, payload.last_error ? 'failure' : 'success');
           window.setTimeout(() => clearButtonState(button), 700);
@@ -1255,25 +1363,30 @@
       }
     }
 
+    function scheduleConfigSync() {
+      if (configSyncTimer) window.clearTimeout(configSyncTimer);
+      configSyncTimer = window.setTimeout(() => {
+        post('/api/config', collectConfigPayload());
+      }, 250);
+    }
+
     elements.navOperational.addEventListener('click', () => activateWindow('operational'));
     elements.navLifecycle.addEventListener('click', () => activateWindow('lifecycle'));
     elements.navImportantData.addEventListener('click', () => activateWindow('important-data'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
-    elements.applyConfigButton.addEventListener('click', () => post('/api/config', {
-      serial_port: elements.serialPort.value.trim() || 'COM4',
-      wifi_ssid: elements.wifiSsid.value.trim(),
-      wifi_password: elements.wifiPassword.value,
-      server_ip: elements.serverIp.value.trim(),
-      server_port: Number(elements.serverPort.value || 3333),
-      wifi_connect_timeout_ms: Number(elements.wifiTimeout.value || 10000),
-      tcp_connect_timeout_ms: Number(elements.tcpTimeout.value || 3000),
-      keepalive_period_ms: Number(elements.keepaliveMs.value || 100),
-    }, elements.applyConfigButton));
+    elements.applyConfigButton.addEventListener('click', () => post('/api/config', collectConfigPayload(), elements.applyConfigButton));
     elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
     elements.initializeButton.addEventListener('click', () => post('/api/command/initialize', null, elements.initializeButton));
     elements.keepaliveButton.addEventListener('click', () => post('/api/command/keepalive', null, elements.keepaliveButton));
-    elements.sendDataButton.addEventListener('click', () => post('/api/command/send-data', null, elements.sendDataButton));
+    elements.sendDataButton.addEventListener('click', () => {
+      elements.sendDataPayload.value = randomWikiSentence();
+      post(
+        '/api/command/send-data',
+        { payload_text: elements.sendDataPayload.value },
+        elements.sendDataButton,
+      );
+    });
     elements.loggerToggleButton.addEventListener('click', () => {
       loggerPaused = !loggerPaused;
       syncLoggerToggle();
@@ -1281,6 +1394,19 @@
         elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
         elements.logWindow.scrollTop = 0;
       }
+    });
+    [
+      elements.serialPort,
+      elements.wifiSsid,
+      elements.wifiPassword,
+      elements.serverIp,
+      elements.serverPort,
+      elements.wifiTimeout,
+      elements.tcpTimeout,
+      elements.keepaliveMs,
+    ].forEach((input) => {
+      input.addEventListener('input', scheduleConfigSync);
+      input.addEventListener('change', scheduleConfigSync);
     });
 
     activateWindow('operational');

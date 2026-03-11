@@ -27,6 +27,10 @@ class TransportConfigRequest(BaseModel):
     keepalive_period_ms: int = Field(100, ge=1, le=5000)
 
 
+class SendDataRequest(BaseModel):
+    payload_text: str = Field("espresso_payload", min_length=1, max_length=512)
+
+
 def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
     """@brief Execute one simulator action and always return a JSON snapshot.
 
@@ -101,11 +105,12 @@ def command_keepalive() -> dict[str, object]:
 
 
 @router.post("/command/send-data")
-def command_send_data() -> dict[str, object]:
+def command_send_data(request: SendDataRequest | None = None) -> dict[str, object]:
     """@brief Trigger one server-side DATA transmit action.
 
     @details The low-level runtime exposes this route only after the ESP
     controller has reached keepalive-ready connection state.
     """
 
-    return _run_snapshot_action("command_send_data", link_runtime.send_data)
+    payload_text = request.payload_text if request is not None else "espresso_payload"
+    return _run_snapshot_action("command_send_data", lambda: link_runtime.send_data(payload_text))

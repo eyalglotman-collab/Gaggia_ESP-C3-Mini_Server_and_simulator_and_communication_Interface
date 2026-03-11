@@ -2,10 +2,19 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.11\par
-- Summary: Made reset automatically progress through initialize and connect toward keepalive, with stage-specific error latching at every failure point.\par
+- Version: 0.1.12\par
+- Summary: Tightened server-side connect gating, added live send-data payload editing, and fixed UI editing/visibility issues in the transport controls.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 17:05:00\b0\par
+- Version: 0.1.12\par
+- Firmware Version: 0.1.12\par
+- Summary: Refined the simulator operator UI and backend gating around connect completion, payload sending, and editable transport configuration.\par
+- Notes: Corrected the connect-state logic so a generic bridge `connect_ack` no longer counts as real client connection success, added explicit initialize/connect pass gating for Keepalive and Send Data invokes, introduced a send-data payload text box populated with random encyclopedia-style sentences on each send, made transport profile edits overwrite the live config while preserving the field currently being edited during snapshot refresh, improved runtime error visibility in the flash banner, and added side-by-side connection-integer display under Server States.\par
+- Resolved Defects:\par
+  - FLOW-20260311-3: The server runtime could advance past connect on bridge acknowledgement alone even when the real client had not connected.\par
+  - UI-20260311-5: Snapshot refresh overwrote focused transport profile inputs, preventing operators from editing SSID, IP, and related fields.\par
+\par
 \b 2026-03-11 16:40:00\b0\par
 - Version: 0.1.11\par
 - Firmware Version: 0.1.11\par

@@ -310,7 +310,7 @@ def test_reset_automatically_progresses_into_initialize_and_connect(monkeypatch)
     assert connect_snapshot.json()['current_state'] == 'connect'
 
 
-def test_connect_ack_automatically_promotes_runtime_to_keepalive(monkeypatch) -> None:
+def test_connect_ack_does_not_promote_runtime_to_keepalive(monkeypatch) -> None:
     client = TestClient(app)
 
     _reset_runtime_for_test()
@@ -325,6 +325,46 @@ def test_connect_ack_automatically_promotes_runtime_to_keepalive(monkeypatch) ->
                 device_live_integer=1,
                 sequence=2,
                 payload=b'connect_ack',
+            )
+        ],
+    ]
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(
+        serial_link_manager,
+        'pop_received_frames',
+        lambda: rx_batches.pop(0) if rx_batches else [],
+    )
+
+    client.post('/api/command/reset')
+    client.get('/api/link')
+    client.get('/api/link')
+    waiting_snapshot = client.get('/api/link')
+
+    assert waiting_snapshot.status_code == 200
+    payload = waiting_snapshot.json()
+    assert payload['current_state'] == 'connect'
+    assert payload['important_data']['TCP Connected'] == 'No'
+    assert payload['important_data']['Send Data Enabled'] == 'No'
+
+
+def test_explicit_client_connected_promotes_runtime_to_keepalive(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    rx_batches = [
+        [],
+        [],
+        [
+            Frame(
+                message_type=MessageType.ACK,
+                host_live_integer=0,
+                device_live_integer=1,
+                sequence=2,
+                payload=b'client_connected',
             )
         ],
     ]
@@ -363,7 +403,53 @@ def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload['current_state'] == 'error'
-    assert payload['last_error'] == 'send data requires keepalive-ready connection'
+    assert payload['last_error'] == 'send data invoke rejected: server has not completed initialize and connect'
+
+
+def test_keepalive_is_rejected_until_initialize_and_connect_pass(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    response = client.post('/api/command/keepalive')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['current_state'] == 'error'
+    assert payload['last_error'] == 'keepalive invoke rejected: server has not completed initialize and connect'
+
+
+def test_send_data_uses_requested_payload_text(monkeypatch) -> None:
+    client = TestClient(app)
+    sent_payloads: list[bytes] = []
+
+    _reset_runtime_for_test()
+
+    def capture_frame(frame: Frame) -> SerialLinkSnapshot:
+      sent_payloads.append(frame.payload)
+      return _open_transport_snapshot()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', capture_frame)
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    with link_runtime._lock:  # noqa: SLF001 - controlled state setup for payload regression
+        link_runtime._current_state = LinkState.KEEPALIVE  # noqa: SLF001
+        link_runtime._initialize_completed = True  # noqa: SLF001
+        link_runtime._connect_completed = True  # noqa: SLF001
+        link_runtime._send_data_enabled = True  # noqa: SLF001
+        link_runtime._tcp_connected = True  # noqa: SLF001
+        link_runtime._wifi_connected = True  # noqa: SLF001
+
+    response = client.post('/api/command/send-data', json={'payload_text': 'The transistor enabled compact electronic circuits.'})
+
+    assert response.status_code == 200
+    assert sent_payloads[-1] == b'The transistor enabled compact electronic circuits.'
 
 
 def test_server_interface_frame_codec_round_trip() -> None:

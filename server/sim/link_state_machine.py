@@ -14,6 +14,7 @@ from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
 
 WATCHDOG_MS = 100
 WATCHDOG_GRACE_MS = 350
+CONNECT_SUCCESS_PAYLOADS = {"client_connected", "connect_success", "tcp_connected"}
 
 
 class LinkState(StrEnum):
@@ -93,6 +94,8 @@ class LinkRuntime:
         self._wifi_connected = False
         self._tcp_connected = False
         self._bridge_ready = False
+        self._initialize_completed = False
+        self._connect_completed = False
         self._send_data_enabled = False
         self._append_log("Transport runtime ready. Default state is reset.")
 
@@ -133,6 +136,8 @@ class LinkRuntime:
         self._last_valid_rx = None
         self._connect_requested_at = None
         self._keepalive_ack_pending = False
+        self._initialize_completed = False
+        self._connect_completed = False
         self._send_data_enabled = False
         self._pending_auto_stage = None
 
@@ -212,6 +217,7 @@ class LinkRuntime:
         ):
             return
         self._pending_auto_stage = None
+        self._initialize_completed = True
         self._connect_requested_at = datetime.now(UTC)
         self._wifi_connected = True
         self._tcp_connected = False
@@ -326,22 +332,34 @@ class LinkRuntime:
                 self._set_error(payload_text or "generic unknown failure")
                 continue
 
-            if frame.message_type in (MessageType.ACK, MessageType.KEEPALIVE, MessageType.DATA):
+            if frame.message_type in (MessageType.KEEPALIVE, MessageType.DATA):
                 self._watchdog_armed = True
                 self._wifi_connected = True
                 self._tcp_connected = True
                 self._bridge_ready = True
 
-            if self._current_state is LinkState.CONNECT and (
-                payload_text == "connect_ack" or frame.message_type in (MessageType.KEEPALIVE, MessageType.DATA)
-            ):
+            if self._current_state is LinkState.CONNECT and payload_text == "connect_ack":
+                self._wifi_connected = True
+                self._tcp_connected = False
+                self._bridge_ready = True
+                self._append_log(
+                    "Bridge acknowledged CONNECT, but the runtime is still waiting for explicit client connection success."
+                )
+                continue
+
+            if self._current_state is LinkState.CONNECT and payload_text in CONNECT_SUCCESS_PAYLOADS:
                 self._connect_requested_at = None
                 self._keepalive_ack_pending = False
                 self._pending_auto_stage = None
+                self._connect_completed = True
                 self._send_data_enabled = True
+                self._watchdog_armed = True
+                self._wifi_connected = True
+                self._tcp_connected = True
+                self._bridge_ready = True
                 self._set_state(
                     LinkState.KEEPALIVE,
-                    "Connect response received. Server state advanced to keepalive supervision.",
+                    "Explicit client connection success received. Server state advanced to keepalive supervision.",
                 )
                 continue
 
@@ -534,8 +552,11 @@ class LinkRuntime:
             if self._current_state is LinkState.ERROR:
                 self._append_log("Keepalive ignored because reset is required to clear the latched error.")
                 return self._snapshot_locked()
+            if not self._initialize_completed or not self._connect_completed:
+                self._set_error("keepalive invoke rejected: server has not completed initialize and connect")
+                return self._snapshot_locked()
             if self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-                self._set_error("keepalive requires an active connection")
+                self._set_error("keepalive invoke rejected: active keepalive state is not available")
                 return self._snapshot_locked()
             self._host_live_integer += 1
             if not self._try_send_command_locked(
@@ -551,12 +572,14 @@ class LinkRuntime:
                 self._set_state(LinkState.KEEPALIVE, "Keepalive supervision resumed.")
             return self._snapshot_locked()
 
-    def send_data(self) -> LinkSnapshot:
+    def send_data(self, payload_text: str = "espresso_payload") -> LinkSnapshot:
         """@brief Send application data only after keepalive is active.
 
         @details The send-data command remains disabled until the connect phase
         succeeds. The runtime stays in `send_data` while data traffic is
         allowed, but error recovery still requires `reset`.
+
+        @param[in] payload_text UTF-8 payload text to transmit in the DATA frame.
         """
 
         with self._lock:
@@ -564,12 +587,15 @@ class LinkRuntime:
             if self._current_state is LinkState.ERROR:
                 self._append_log("Send data ignored because reset is required to clear the latched error.")
                 return self._snapshot_locked()
+            if not self._initialize_completed or not self._connect_completed:
+                self._set_error("send data invoke rejected: server has not completed initialize and connect")
+                return self._snapshot_locked()
             if not self._send_data_enabled or self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-                self._set_error("send data requires keepalive-ready connection")
+                self._set_error("send data invoke rejected: keepalive-ready connection is not available")
                 return self._snapshot_locked()
             if not self._try_send_command_locked(
                 MessageType.DATA,
-                "espresso_payload",
+                payload_text,
                 "send data transmit failed",
             ):
                 return self._snapshot_locked()
@@ -593,6 +619,8 @@ class LinkRuntime:
             "Server Endpoint": f"{self._config.server_ip}:{self._config.server_port}",
             "Wi-Fi Ready": "Yes" if self._wifi_ready else "No",
             "Bridge Ready": "Yes" if self._bridge_ready else "No",
+            "Initialize Passed": "Yes" if self._initialize_completed else "No",
+            "Connect Passed": "Yes" if self._connect_completed else "No",
             "Wi-Fi Connected": "Yes" if self._wifi_connected else "No",
             "TCP Connected": "Yes" if self._tcp_connected else "No",
             "Send Data Enabled": "Yes" if self._send_data_enabled else "No",
