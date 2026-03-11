@@ -97,6 +97,7 @@ class LinkRuntime:
         self._initialize_completed = False
         self._connect_completed = False
         self._send_data_enabled = False
+        self._last_received_client_text = "No client text received yet."
         self._append_log("Transport runtime ready. Default state is reset.")
 
     def _timestamp(self) -> str:
@@ -140,6 +141,7 @@ class LinkRuntime:
         self._connect_completed = False
         self._send_data_enabled = False
         self._pending_auto_stage = None
+        self._last_received_client_text = "No client text received yet."
 
     def _set_error(self, message: str) -> None:
         """@brief Latch an error and move the low-level runtime into `error`.
@@ -366,6 +368,7 @@ class LinkRuntime:
             if self._current_state in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
                 self._keepalive_ack_pending = False
                 if frame.message_type == MessageType.DATA:
+                    self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
                     self._send_data_enabled = True
                     self._set_state(
                         LinkState.SEND_DATA,
@@ -624,6 +627,7 @@ class LinkRuntime:
             "Wi-Fi Connected": "Yes" if self._wifi_connected else "No",
             "TCP Connected": "Yes" if self._tcp_connected else "No",
             "Send Data Enabled": "Yes" if self._send_data_enabled else "No",
+            "Text Received From Client": self._last_received_client_text,
             "Wi-Fi Timeout (ms)": str(self._config.wifi_connect_timeout_ms),
             "TCP Timeout (ms)": str(self._config.tcp_connect_timeout_ms),
             "Keepalive Period (ms)": str(self._config.keepalive_period_ms),

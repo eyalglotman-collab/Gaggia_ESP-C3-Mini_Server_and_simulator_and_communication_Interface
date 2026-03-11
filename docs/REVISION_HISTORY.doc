@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.12\par
-- Summary: Tightened server-side connect gating, added live send-data payload editing, and fixed UI editing/visibility issues in the transport controls.\par
+- Version: 0.1.13\par
+- Summary: Added received-client text visibility, corrected server/client counter placement in the UI, and kept firmware version unchanged because no firmware files changed.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 17:20:00\b0\par
+- Version: 0.1.13\par
+- Firmware Version: 0.1.12\par
+- Summary: Refined the server-state display and release versioning policy for simulator-only revisions.\par
+- Notes: Added a read-only `Text Received From Client` box under Server States, corrected the live-integer presentation so the server-side value appears on the server side and the client-side value appears on the client side, updated tests for received client payload visibility, and kept the firmware version fixed at `0.1.12` because this release changes simulator code only.\par
+- Resolved Defects:\par
+  - UI-20260311-6: The server/client live-integer display and received-client visibility were ambiguous during operator review.\par
+\par
 \b 2026-03-11 17:05:00\b0\par
 - Version: 0.1.12\par
 - Firmware Version: 0.1.12\par

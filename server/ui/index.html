@@ -636,6 +636,24 @@
       line-height:1.28;
     }
 
+    .received-box {
+      margin-top:8px;
+      display:grid;
+      gap:6px;
+    }
+
+    .received-text {
+      min-height:84px;
+      border-radius:12px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(10, 18, 25, .88);
+      color:#d8efff;
+      padding:10px 12px;
+      font-size:.8rem;
+      line-height:1.28;
+      white-space:pre-wrap;
+    }
+
     .logger-panel {
       min-height:520px;
       max-height:520px;
@@ -953,13 +971,17 @@
                   <div id="states" class="states"></div>
                   <div id="connectionIntegers" class="connection-integers">
                     <div class="connection-integer">
-                      <div class="k">Sent By Server</div>
+                      <div class="k">Server Live Integer</div>
                       <div id="serverConnectionInteger" class="v">0</div>
                     </div>
                     <div class="connection-integer">
-                      <div class="k">Received From Client</div>
+                      <div class="k">Client Live Integer</div>
                       <div id="clientConnectionInteger" class="v">0</div>
                     </div>
+                  </div>
+                  <div class="received-box">
+                    <div class="label">Text Received From Client</div>
+                    <div id="receivedClientText" class="received-text">No client text received yet.</div>
                   </div>
                 </section>
               </div>
@@ -1038,6 +1060,7 @@
       states: document.getElementById('states'),
       serverConnectionInteger: document.getElementById('serverConnectionInteger'),
       clientConnectionInteger: document.getElementById('clientConnectionInteger'),
+      receivedClientText: document.getElementById('receivedClientText'),
       importantData: document.getElementById('importantData'),
       logWindow: document.getElementById('logWindow'),
       flash: document.getElementById('flash'),
@@ -1272,8 +1295,9 @@
     }
 
     function renderConnectionIntegers(snapshot) {
-      elements.serverConnectionInteger.textContent = String(snapshot.host_live_integer ?? 0);
-      elements.clientConnectionInteger.textContent = String(snapshot.device_live_integer ?? 0);
+      elements.serverConnectionInteger.textContent = String(snapshot.device_live_integer ?? 0);
+      elements.clientConnectionInteger.textContent = String(snapshot.host_live_integer ?? 0);
+      elements.receivedClientText.textContent = snapshot.important_data['Text Received From Client'] || 'No client text received yet.';
     }
 
     function syncInputValue(input, value) {

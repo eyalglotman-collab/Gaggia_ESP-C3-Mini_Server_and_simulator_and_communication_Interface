@@ -452,6 +452,41 @@ def test_send_data_uses_requested_payload_text(monkeypatch) -> None:
     assert sent_payloads[-1] == b'The transistor enabled compact electronic circuits.'
 
 
+def test_received_client_text_is_exposed_in_snapshot(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    rx_batches = [[
+        Frame(
+            message_type=MessageType.DATA,
+            host_live_integer=2,
+            device_live_integer=6,
+            sequence=9,
+            payload=b'The client replied with application data.',
+        )
+    ]]
+
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(
+        serial_link_manager,
+        'pop_received_frames',
+        lambda: rx_batches.pop(0) if rx_batches else [],
+    )
+
+    with link_runtime._lock:  # noqa: SLF001 - controlled state setup for received-data regression
+        link_runtime._current_state = LinkState.KEEPALIVE  # noqa: SLF001
+        link_runtime._initialize_completed = True  # noqa: SLF001
+        link_runtime._connect_completed = True  # noqa: SLF001
+        link_runtime._send_data_enabled = True  # noqa: SLF001
+
+    response = client.get('/api/link')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['important_data']['Text Received From Client'] == 'The client replied with application data.'
+
+
 def test_server_interface_frame_codec_round_trip() -> None:
     frame = Frame(
         message_type=MessageType.KEEPALIVE,
