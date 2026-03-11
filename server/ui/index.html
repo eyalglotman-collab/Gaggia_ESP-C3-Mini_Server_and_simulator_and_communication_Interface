@@ -99,6 +99,97 @@
       letter-spacing:.08em;
     }
 
+    .splash-overlay {
+      position:fixed;
+      inset:0;
+      z-index:40;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      background:
+        radial-gradient(circle at top, rgba(97,232,255,.22), transparent 36%),
+        radial-gradient(circle at bottom, rgba(79,155,255,.16), transparent 30%),
+        rgba(2, 8, 13, .92);
+      transition:opacity .65s ease, visibility .65s ease;
+    }
+
+    .splash-overlay.hidden {
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+    }
+
+    .splash-card {
+      width:min(92vw, 640px);
+      padding:34px 36px;
+      border-radius:26px;
+      border:1px solid rgba(97,232,255,.28);
+      background:
+        linear-gradient(180deg, rgba(15,34,50,.98), rgba(7,18,29,.98));
+      box-shadow:
+        0 28px 80px rgba(0,0,0,.44),
+        inset 0 1px 0 rgba(255,255,255,.08);
+      text-align:center;
+    }
+
+    .splash-eyebrow {
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.24em;
+      font-size:.76rem;
+      margin-bottom:12px;
+    }
+
+    .splash-title {
+      margin:0;
+      font-size:2.2rem;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+
+    .splash-divider {
+      width:96px;
+      height:2px;
+      margin:18px auto 22px;
+      background:linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+
+    .splash-grid {
+      display:grid;
+      gap:12px;
+      text-align:left;
+    }
+
+    .splash-datum {
+      border-radius:15px;
+      border:1px solid rgba(96,202,255,.18);
+      background:rgba(4,13,21,.82);
+      padding:14px 16px;
+    }
+
+    .splash-datum .k {
+      color:var(--muted);
+      font-size:.73rem;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+    }
+
+    .splash-datum .v {
+      margin-top:6px;
+      font-size:1rem;
+      font-weight:700;
+      color:var(--text);
+      word-break:break-word;
+    }
+
+    .splash-note {
+      margin-top:18px;
+      color:var(--muted);
+      font-size:.92rem;
+      letter-spacing:.04em;
+    }
+
     .note, .flash {
       color:var(--muted);
       font-size:.96rem;
@@ -486,6 +577,32 @@
   </style>
 </head>
 <body>
+  <div id="splashOverlay" class="splash-overlay">
+    <section class="splash-card">
+      <div class="splash-eyebrow">Startup Splash</div>
+      <h1 id="splashAppName" class="splash-title">Loading Simulator...</h1>
+      <div class="splash-divider"></div>
+      <div class="splash-grid">
+        <div class="splash-datum">
+          <div class="k">Application</div>
+          <div id="splashAppLabel" class="v">Loading...</div>
+        </div>
+        <div class="splash-datum">
+          <div class="k">Version</div>
+          <div id="splashVersion" class="v">Loading...</div>
+        </div>
+        <div class="splash-datum">
+          <div class="k">Firmware Version</div>
+          <div id="splashFirmwareVersion" class="v">Loading...</div>
+        </div>
+        <div class="splash-datum">
+          <div class="k">Compilation Date &amp; Time</div>
+          <div id="splashBuildTimestamp" class="v">Loading...</div>
+        </div>
+      </div>
+      <div class="splash-note">The operational console will appear automatically after 5 seconds.</div>
+    </section>
+  </div>
   <main>
     <section class="topbar">
       <div class="hero">
@@ -604,6 +721,12 @@
       importantData: document.getElementById('importantData'),
       logWindow: document.getElementById('logWindow'),
       flash: document.getElementById('flash'),
+      splashOverlay: document.getElementById('splashOverlay'),
+      splashAppName: document.getElementById('splashAppName'),
+      splashAppLabel: document.getElementById('splashAppLabel'),
+      splashVersion: document.getElementById('splashVersion'),
+      splashFirmwareVersion: document.getElementById('splashFirmwareVersion'),
+      splashBuildTimestamp: document.getElementById('splashBuildTimestamp'),
     };
     let latestLogs = [];
     let loggerPaused = false;
@@ -634,6 +757,30 @@
 
     async function snapshot() {
       return callJson('/api/link');
+    }
+
+    async function loadSplashInfo() {
+      try {
+        const info = await callJson('/api/app-info');
+        elements.splashAppName.textContent = info.app_name;
+        elements.splashAppLabel.textContent = info.app_name;
+        elements.splashVersion.textContent = info.version;
+        elements.splashFirmwareVersion.textContent = info.firmware_version;
+        elements.splashBuildTimestamp.textContent = info.build_timestamp;
+        document.title = info.app_name;
+      } catch (error) {
+        elements.splashAppName.textContent = 'Simulator Startup';
+        elements.splashAppLabel.textContent = 'Metadata unavailable';
+        elements.splashVersion.textContent = 'Unknown';
+        elements.splashFirmwareVersion.textContent = 'Unknown';
+        elements.splashBuildTimestamp.textContent = 'Unavailable';
+      }
+    }
+
+    function hideSplashAfterTimeout() {
+      window.setTimeout(() => {
+        elements.splashOverlay.classList.add('hidden');
+      }, 5000);
     }
 
     function setFlash(message, error = false) {
@@ -832,6 +979,8 @@
 
     activateWindow('operational');
     syncLoggerToggle();
+    loadSplashInfo();
+    hideSplashAfterTimeout();
     refresh();
     setInterval(refresh, 1000);
   </script>

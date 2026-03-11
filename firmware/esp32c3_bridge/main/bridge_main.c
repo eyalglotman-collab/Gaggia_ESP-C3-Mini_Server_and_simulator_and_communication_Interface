@@ -4,6 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/*
+ * @brief ESP32-C3 bridge firmware baseline for the simulator transport path.
+ *
+ * @details The canonical firmware version for this bridge project is tracked in
+ * `firmware/esp32c3_bridge/VERSION` using the same X.Y.Z rules as the
+ * simulator application version tree. Keep firmware-facing documentation and
+ * any exposed runtime metadata aligned with that file when the bridge behavior
+ * changes.
+ */
+
 #include <stdint.h>
 #include <string.h>
 

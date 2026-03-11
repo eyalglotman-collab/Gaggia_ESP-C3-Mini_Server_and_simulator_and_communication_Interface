@@ -75,7 +75,9 @@ for name in packages:
         print("{}=MISSING".format(name))
 '@
 
-    $packageLines = @(& $PythonExe -c $packageCheckScript 2>$null)
+    # Feed the probe script over stdin because PowerShell can mangle quotes in
+    # inline `python -c` payloads on some Windows hosts.
+    $packageLines = @($packageCheckScript | & $PythonExe - 2>$null)
     $packageVersions = @{}
     foreach ($packageLine in $packageLines) {
         if ($packageLine -match '^(?<name>[^=]+)=(?<version>.+)$') {

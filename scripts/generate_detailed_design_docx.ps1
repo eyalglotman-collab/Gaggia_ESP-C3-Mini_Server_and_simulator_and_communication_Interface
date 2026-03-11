@@ -15,6 +15,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $TempDir = Join-Path $ProjectRoot ".cache\detailed_design_docx_tmp"
 $OutputDocx = Join-Path $ProjectRoot "docs\EyalEspressoServerSimulatorDetailedDesign.docx"
 $Version = (Get-Content (Join-Path $ProjectRoot "VERSION") -Raw).Trim()
+$FirmwareVersion = (Get-Content (Join-Path $ProjectRoot "firmware\esp32c3_bridge\VERSION") -Raw).Trim()
 $ReviewedOn = Get-Date -Format 'dd-MMM-yy HH:mm:ss'
 $DiagramDir = Join-Path $ProjectRoot "docs\diagrams"
 $MaxImageWidthEmu = 6.2 * 914400
@@ -587,6 +588,10 @@ $bodyItems = @(
     "Normal Run Command: ./scripts/run_simulator.ps1"
     "Development Run Command: ./scripts/run_simulator.ps1 -Reload"
     "Default Access URL: http://127.0.0.1:8000"
+    "Repository Version Tree:"
+    "  - Application Version = $Version from repository root VERSION"
+    "  - Firmware Version = $FirmwareVersion from firmware/esp32c3_bridge/VERSION"
+    "Version Tree Rule: application and firmware versions use the same X.Y.Z policy but remain independently tracked artifacts inside one repository version tree."
     "Runtime Version Baseline:"
     "  - Python = 3.13.3"
     "  - fastapi = 0.135.1"
@@ -617,6 +622,7 @@ $bodyItems = @(
     "  - verify readiness with GET /health expecting 200 OK and {""status"":""ok""}"
     "  - open the browser only after readiness succeeds"
     "  - for the manual batch launcher, show a Yes/No prompt after backend readiness asking whether to open the simulator in a fresh browser session with a cache-busting URL"
+    "  - the startup splash screen shall show the application name, simulator application version, bridge firmware version, and backend build timestamp for 5 seconds"
     "  - bypass stale browser state with a cache-busting query string when opening the UI"
     "Operational Note: if a foreground uvicorn launch works but a detached tool-hosted launch dies immediately, classify the problem as process-hosting automation first, not as a backend application defect."
     "Helper Script Inventory:"

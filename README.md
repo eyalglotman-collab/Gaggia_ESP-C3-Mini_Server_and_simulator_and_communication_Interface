@@ -68,9 +68,11 @@
   - good approval scope includes common local workflows such as repo-local Python launches, repo-local PowerShell helper scripts, health checks, tests, build commands, flash commands, and browser opens
   - do not rely on blanket approval for all Python or all PowerShell commands; approvals should stay specific enough to remain safe and auditable
 - Repository version is tracked in root `VERSION` with format `X.Y.Z`.
+- Firmware bridge version is tracked in `firmware/esp32c3_bridge/VERSION` with the same `X.Y.Z` format.
 - `X`: major functionality/refactoring changes.
 - `Y`: minor bug-fix and incremental functionality changes.
 - `Z`: sub-version increment for accepted successful local verification cycles.
+- Application and firmware versions form one repository version tree and must stay aligned with the relevant docs, splash metadata, and firmware-source comments.
 - After a successful local verification cycle, Codex must ask whether to commit current changes and bump `Z`.
 - After a successful client build+flash or simulator verification cycle that is meant to be exercised through the simulator UI, Codex must automatically run the simulator UI and ask Eyal whether it loaded successfully.
 - Every version bump and every project revision must add a new entry to docs/REVISION_HISTORY.doc.
@@ -182,6 +184,7 @@
 - `README.md`: workflow and session handoff
 - `AGENTS.md`: repo-specific Codex rules
 - `VERSION`: canonical project version
+- `firmware/esp32c3_bridge/VERSION`: canonical ESP32-C3 bridge firmware version
 - `docs/EyalEspressoServerSimulatorRequirements and Design.docx`: requirements and design document
 - `docs/EyalEspressoServerSimulatorDetailedDesign.docx`: detailed design document
 - `docs/REVISION_HISTORY.doc`: revision history and latest feature list
