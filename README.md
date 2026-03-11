@@ -100,6 +100,7 @@
   - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
   - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
+  - `scripts\run_simulator.bat` is the Windows batch convenience wrapper for shells or tools that prefer `.bat` entry points; it forwards arguments into `scripts\run_simulator.ps1`
   - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
   - if the backend must outlive the initiating shell, run it under a stable supervising host rather than a transient detached task
   - preserve backend stdout and stderr visibility or redirect them into repo-local logs for diagnosis
@@ -163,6 +164,7 @@
 - `docs/VERSIONING.md`: versioning policy
 - `scripts/generate_requirements_docx.ps1`: requirements document generator
 - `scripts/generate_detailed_design_docx.ps1`: detailed design generator
+- `scripts/run_simulator.bat`: Windows batch wrapper for the repo-local simulator PowerShell launcher
 - When creating or updating `.docx` files programmatically, use an extract/edit/repack flow for the OpenXML container (`.docx` is a ZIP package) instead of in-place ZIP entry replacement on this host.
 - Programmatic `.docx` generation must write valid OpenXML package entry names with forward slashes such as `_rels/.rels` and `word/document.xml`, and must emit valid XML text without doubled quote escaping inside the stored XML files.
 - `scripts/play_wait_sound.ps1`: one-shot WAV playback helper
