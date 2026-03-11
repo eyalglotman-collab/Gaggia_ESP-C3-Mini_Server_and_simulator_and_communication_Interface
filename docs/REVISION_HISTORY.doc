@@ -2,10 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.5\par
-- Summary: Documented the stable Python `uvicorn` backend launch contract, updated simulator design artifacts, and recorded runtime-launch best practices.\par
+- Version: 0.1.6\par
+- Summary: Standardized PowerShell script documentation, added comment best-practice rules, and versioned the documentation cleanup.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 11:59:47\b0\par
+- Version: 0.1.6\par
+- Summary: Standardized simulator script documentation and comment rules.\par
+- Notes: Added file-level documentation blocks to every maintained PowerShell helper, filled in missing helper-function headers in the detailed-design generator, added intent-focused inline comments for non-obvious host-specific behavior, and updated README workflow rules to require strong script documentation plus comment and inline-code best practices.\par
+- Resolved Defects:\par
+  - DOC-20260311-2: Simulator helper scripts did not use one consistent best-practice documentation standard, which made maintenance and review harder.\par
+\par
 \b 2026-03-11 11:51:01\b0\par
 - Version: 0.1.5\par
 - Summary: Formalized the simulator backend launch design and versioned the documentation update.\par
