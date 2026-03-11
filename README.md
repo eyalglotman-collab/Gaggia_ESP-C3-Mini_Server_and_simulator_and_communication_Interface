@@ -110,6 +110,8 @@
 - Backend launch best practice for this Python + `uvicorn` simulator:
   - use a deterministic repo-local launcher script or service wrapper
   - prefer the repository virtual environment interpreter before a global Python installation
+  - inspect the current port owner before termination; do not kill unrelated listeners just because they occupy the target port
+  - prefer graceful shutdown before forced termination when replacing an existing simulator listener
   - capture stdout and stderr to logs or keep them visible in the supervising console
   - require a concrete readiness signal such as `GET /health`
   - supervise the process with a stable host if it must outlive the initiating shell
@@ -118,6 +120,8 @@
   - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
   - `scripts\run_simulator.bat` is the Windows batch convenience wrapper for shells or tools that prefer `.bat` entry points; it forwards arguments into `scripts\run_simulator.ps1`
   - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
+  - if the target port is already listening, inspect the owning process and only replace it when it can be positively identified as this simulator backend
+  - when replacing an old simulator listener, attempt graceful termination first and force-stop only as fallback
   - if the backend must outlive the initiating shell, run it under a stable supervising host rather than a transient detached task
   - preserve backend stdout and stderr visibility or redirect them into repo-local logs for diagnosis
   - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
