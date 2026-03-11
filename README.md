@@ -17,6 +17,13 @@
 
 - Product requirements and application design shall be maintained in `docs/EyalEspressoServerSimulatorRequirements and Design.docx`.
 - `README.md` is the workflow/session handoff file; the requirements/design document is the primary place for application requirements, UX intent, architecture decisions, and planned features.
+- At the start of work in this repository, Codex must read the documentation set under `docs/` and learn the purpose and structure of each maintained document before making design or implementation decisions.
+- The required documentation review includes at minimum:
+  - `docs/EyalEspressoServerSimulatorRequirements and Design.docx`
+  - `docs/EyalEspressoServerSimulatorDetailedDesign.docx`
+  - `docs/REVISION_HISTORY.doc`
+  - `docs/VERSIONING.md`
+  - the maintained text architecture sources under `docs/architecture/`
 - Every time Codex opens and reviews `docs/EyalEspressoServerSimulatorRequirements and Design.docx`, Codex must update the document field `Reviewed on` with the current time.
 - After any documentation change in this repository, Codex must ask Eyal whether to open the `docs` folder.
 - Design documentation must be maintained in dual format:
