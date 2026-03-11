@@ -78,6 +78,7 @@
 - Every version bump and every project revision must add a new entry to docs/REVISION_HISTORY.doc.
 - Each REVISION_HISTORY entry must include:
   - the version/revision number
+  - the firmware version that applies to that release entry under the current application-version branch
   - the date
   - the time in `HH:MM:SS` format
   - a brief description of what changed relative to the previous revision
