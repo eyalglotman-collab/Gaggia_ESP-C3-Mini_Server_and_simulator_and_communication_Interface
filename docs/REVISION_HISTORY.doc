@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.8\par
-- Summary: Reworked the simulator browser UI into a richer dashboard layout with live summary chips and clearer control grouping.\par
+- Version: 0.1.9\par
+- Summary: Reorganized the simulator UI into three screen groups with corrected top-navigation scrolling and denser operator controls.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 14:46:59\b0\par
+- Version: 0.1.9\par
+- Firmware Version: 0.1.9\par
+- Summary: Restructured the operator screens and versioned the navigation-alignment revision.\par
+- Notes: Increased UI typography, split the operator surface into Screen 1 for Operational Control and Transport Profile, Screen 2 for Lifecycle Actions plus Machine State and Logger, and Screen 3 for Important Data, replaced the middle top-navigation action with a Lifecycle target, tightened and lightened the transport profile list styling, removed title-frame boxes, and corrected nav scrolling so each button compensates for the static dashboard header and per-screen header bar heights.\par
+- Resolved Defects:\par
+  - UI-20260311-4: Navigation to screen groups landed below the intended top alignment and required repeated presses to reach the correct viewport position.\par
+\par
 \b 2026-03-11 14:13:00\b0\par
 - Version: 0.1.8\par
 - Firmware Version: 0.1.8\par
