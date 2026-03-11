@@ -117,6 +117,7 @@
   - supervise the process with a stable host if it must outlive the initiating shell
   - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
+  - from now on, launch the simulator the same way a standard user would: start from `scripts\run_simulator.bat` unless a lower-level script is being edited or debugged directly
   - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
   - before the manual batch launcher starts any simulator script, run `scripts\verify_simulator_installation.ps1` to verify the required local runtime components and exact development versions
   - if installation verification finds any missing component or version mismatch, show a popup with the gaps and stop instead of continuing to startup
