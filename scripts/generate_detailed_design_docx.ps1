@@ -5,6 +5,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $TempDir = Join-Path $ProjectRoot ".cache\detailed_design_docx_tmp"
 $OutputDocx = Join-Path $ProjectRoot "docs\EyalEspressoServerSimulatorDetailedDesign.docx"
 $Version = (Get-Content (Join-Path $ProjectRoot "VERSION") -Raw).Trim()
+$ReviewedOn = Get-Date -Format 'dd-MMM-yy HH:mm:ss'
 $DiagramDir = Join-Path $ProjectRoot "docs\diagrams"
 $MaxImageWidthEmu = 6.2 * 914400
 
@@ -261,6 +262,7 @@ $bodyItems = @(
     "Eyal Espresso Server Simulator Detailed Design"
     "Document Status: Working Design Baseline"
     "Project Version Reference: $Version"
+    "Reviewed on: $ReviewedOn"
     "Owner: Eyal / Codex"
     ""
     "1. System Context and Planned Split Architecture"
@@ -529,6 +531,21 @@ $bodyItems = @(
     "Normal Run Command: ./scripts/run_simulator.ps1"
     "Development Run Command: ./scripts/run_simulator.ps1 -Reload"
     "Default Access URL: http://127.0.0.1:8000"
+    "Backend Launch Design:"
+    "  - use a deterministic repo-local launcher script or service wrapper"
+    "  - prefer the repository virtual environment interpreter before a global Python installation"
+    "  - capture stdout and stderr to logs or keep them visible in the supervising console"
+    "  - require a concrete readiness signal such as GET /health before opening the UI"
+    "  - supervise the process with a stable host if it must outlive the initiating shell"
+    "  - separate application correctness from editor, sandbox, or task-runner lifetime"
+    "Preferred Uvicorn Launch Contract:"
+    "  - launch scripts/run_simulator.ps1 from the repository root"
+    "  - let the script resolve .\.venv\Scripts\python.exe when available"
+    "  - start uvicorn as server.app:app on 127.0.0.1:8000"
+    "  - verify readiness with GET /health expecting 200 OK and {""status"":""ok""}"
+    "  - open the browser only after readiness succeeds"
+    "  - bypass stale browser state with a cache-busting query string when opening the UI"
+    "Operational Note: if a foreground uvicorn launch works but a detached tool-hosted launch dies immediately, classify the problem as process-hosting automation first, not as a backend application defect."
     ""
     "11. Simulator UI State and Command Feedback"
     "Command Button Rule: simulator command buttons use blue as the default unpressed color."

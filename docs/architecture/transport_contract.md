@@ -34,6 +34,42 @@ This file is the canonical machine-readable design baseline for low-level transp
 | `tcp_connect_timeout_ms` | `3000` | Bound on TCP session establishment after Wi-Fi is ready. |
 | `keepalive_period_ms` | `100` | Host-driven keep-alive cadence. |
 
+## Backend Launch Contract
+
+### Purpose
+
+This section defines the required local runtime-launch behavior for the PC-hosted simulator backend and browser UI. It exists to keep development automation and operator testing deterministic on this Windows host.
+
+### Launch Rules
+
+| Item | Required Practice | Notes |
+| --- | --- | --- |
+| Backend host | Use a deterministic repo-local launcher | The preferred launcher is `scripts\run_simulator.ps1`, which resolves the repository root and starts `uvicorn` from the local `.venv` when available. |
+| Python runtime | Prefer the repository virtual environment | Use `.\.venv\Scripts\python.exe` before falling back to a global `python`. |
+| Process lifetime | Run the backend under a stable supervising host | The backend must not rely on a transient editor task or short-lived tool shell to remain alive. |
+| Logging | Preserve stdout/stderr for diagnosis | Launches should keep console visibility or redirect output into repo-local logs. |
+| Readiness check | Verify runtime readiness before opening the UI | A healthy process alone is insufficient; require a successful `GET /health` response. |
+| Browser launch | Open the UI only after readiness is confirmed | Do not open the browser optimistically. |
+| Frontend freshness | Bypass stale browser state | Use a cache-busting URL or equivalent fresh-load mechanism so the browser does not reuse stale assets. |
+| Separation of concerns | Treat launcher reliability separately from app correctness | If `uvicorn` runs in the foreground but a detached host dies, the issue is process-hosting automation, not necessarily an application bug. |
+
+### Best-Practice Rationale
+
+- use a deterministic launcher script or service wrapper
+- capture stdout and stderr to logs or keep them visible in the supervising console
+- require a concrete readiness signal such as `/health`
+- supervise the process with a stable host if it must outlive the initiating shell
+- separate application correctness from editor, sandbox, or task-runner lifetime
+
+### Recommended Local Launch Flow
+
+| Step | Action | Success Signal | Failure Interpretation |
+| --- | --- | --- | --- |
+| 1 | Start the backend with `scripts\run_simulator.ps1` or an equivalent repo-local wrapper | A persistent `uvicorn` host process exists | Launcher or environment problem |
+| 2 | Wait for `GET /health` to return `200 OK` with `{"status":"ok"}` | Backend is ready to serve API and UI | Backend startup, dependency, or host-lifetime problem |
+| 3 | Open `http://127.0.0.1:8000/` with a cache-busting query string | Browser loads current simulator UI | Browser cache or frontend delivery issue |
+| 4 | Use runtime logger and monitor surfaces during testing | Operator can inspect actionable events | Observability gap in launch or UI |
+
 ## State Definitions
 
 | State | Purpose | Entry Actions | Exit Conditions |

@@ -84,11 +84,18 @@
 - When a successful local verification cycle completes, play the project celebration sound from `sounds\build-success-monkey-1p5x.wav`.
 - After the success sound for a successful local verification/build cycle, Codex must automatically start the simulator application from the repository virtual environment first, confirm that the backend is actually running, and only then open the simulator web UI.
 - Every simulator application launch during Eyal's testing must run with event and logger monitoring enabled so the UI and backend collect actionable runtime data while Eyal exercises the system.
+- Backend launch best practice for this Python + `uvicorn` simulator:
+  - use a deterministic repo-local launcher script or service wrapper
+  - prefer the repository virtual environment interpreter before a global Python installation
+  - capture stdout and stderr to logs or keep them visible in the supervising console
+  - require a concrete readiness signal such as `GET /health`
+  - supervise the process with a stable host if it must outlive the initiating shell
+  - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
-  - launch the repository `.venv`-backed Python application first
-  - the default reliable persistent host method is to start a dedicated PowerShell process that runs:
-    - `Set-Location <repo-root>; .\.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8000`
-  - prefer that persistent PowerShell-hosted launch method over direct detached `Start-Process` calls to `python.exe`, because the persistent host method has been more reliable on this machine
+  - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
+  - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
+  - if the backend must outlive the initiating shell, run it under a stable supervising host rather than a transient detached task
+  - preserve backend stdout and stderr visibility or redirect them into repo-local logs for diagnosis
   - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
   - before opening the browser, clear or bypass cached page state so the browser loads the latest simulator UI instead of stale frontend assets
   - only after that open the browser/UI

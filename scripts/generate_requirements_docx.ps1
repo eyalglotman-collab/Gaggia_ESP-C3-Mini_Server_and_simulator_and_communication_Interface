@@ -4,6 +4,8 @@ param()
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $TempDir = Join-Path $ProjectRoot '.cache\requirements_docx_tmp'
 $OutputDocx = Join-Path $ProjectRoot 'docs\EyalEspressoServerSimulatorRequirements and Design.docx'
+$Version = (Get-Content (Join-Path $ProjectRoot 'VERSION') -Raw).Trim()
+$ReviewedOn = Get-Date -Format 'dd-MMM-yy HH:mm:ss'
 
 # @brief Write a UTF-8 text file without BOM.
 # @details Used for intermediate OpenXML part creation before packaging the
@@ -93,8 +95,8 @@ $documentXml = @"
   <w:body>
     <w:p><w:r><w:t>Eyal Espresso Server Simulator Requirements and Design</w:t></w:r></w:p>
     <w:p><w:r><w:t>Document Status: Working Baseline</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Version: 0.1.0</w:t></w:r></w:p>
-    <w:p><w:r><w:t>Reviewed on: 08-Mar-26 15:45:00</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Version: $Version</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Reviewed on: $ReviewedOn</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>1. Product Overview</w:t></w:r></w:p>
     <w:p><w:r><w:t>Purpose: Simulate the Gaggia controller side of the espresso system and expose test and operator controls through FastAPI.</w:t></w:r></w:p>
@@ -103,9 +105,20 @@ $documentXml = @"
     <w:p><w:r><w:t>FR-001: The simulator shall own one serial COM interface through a single background transport manager.</w:t></w:r></w:p>
     <w:p><w:r><w:t>FR-002: The simulator shall expose get and set operations through FastAPI endpoints.</w:t></w:r></w:p>
     <w:p><w:r><w:t>FR-003: The simulator shall provide controller telemetry and command logging.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>FR-004: The simulator backend shall be started through a deterministic repo-local launcher that runs uvicorn from the repository root.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>FR-005: The simulator shall prefer the repository virtual environment interpreter before any global Python installation.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>FR-006: The backend launch flow shall preserve stdout and stderr visibility or redirect them into repo-local logs for diagnosis.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>FR-007: The simulator UI shall open only after a concrete readiness check succeeds, including a successful GET /health response.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>FR-008: The launch design shall treat backend correctness separately from editor, sandbox, or task-runner process lifetime.</w:t></w:r></w:p>
     <w:p/>
     <w:p><w:r><w:t>3. Architecture Notes</w:t></w:r></w:p>
     <w:p><w:r><w:t>Modules: API layer, serial transport layer, simulator state machine, and tests.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Runtime Stack: Python, FastAPI, pyserial, and uvicorn.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Launch Design: use scripts\run_simulator.ps1 as the deterministic launcher so uvicorn starts from the repository root with the local .venv when available.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Supervision Rule: if the backend must outlive the initiating shell, run it under a stable supervising host rather than a transient detached task.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Readiness Rule: do not open the browser until the backend proves readiness through GET /health.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Frontend Freshness Rule: use a cache-busting URL or equivalent fresh-load behavior when opening the UI.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Best-Practice Rationale: use a deterministic launcher or service wrapper, capture stdout and stderr, require a concrete readiness signal, supervise long-lived processes with a stable host, and separate application correctness from tool lifetime.</w:t></w:r></w:p>
     <w:sectPr>
       <w:pgSz w:w="12240" w:h="15840"/>
       <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>
