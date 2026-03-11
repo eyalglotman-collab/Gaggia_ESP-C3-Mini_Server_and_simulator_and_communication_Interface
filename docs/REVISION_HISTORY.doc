@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.7\par
-- Summary: Simplified the simulator launcher flow to close the temporary shell and leave only the backend host visible.\par
+- Version: 0.1.8\par
+- Summary: Reworked the simulator browser UI into a richer dashboard layout with live summary chips and clearer control grouping.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 14:13:00\b0\par
+- Version: 0.1.8\par
+- Firmware Version: 0.1.8\par
+- Summary: Refreshed the simulator operator dashboard and versioned the verified UI revision.\par
+- Notes: Retitled the browser experience as Eyal Espresso Server Simulator, introduced a fuller dashboard shell with hero and summary cards, reorganized transport controls into grouped sections, improved runtime logger/status presentation, and added live summary chip updates for transport state, logger state, backend health, and build metadata.\par
+- Resolved Defects:\par
+  - UI-20260311-3: The simulator UI looked like an unfinished transport template and did not present the runtime state in a clear operator-facing dashboard.\par
+\par
 \b 2026-03-11 13:56:00\b0\par
 - Version: 0.1.7\par
 - Summary: Simplified the simulator launcher window flow and versioned the startup-behavior fix.\par

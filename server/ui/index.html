@@ -3,100 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Eyal Espresso Transport Template</title>
+  <title>Eyal Espresso Server Simulator</title>
   <style>
     :root {
-      --bg:#06101a;
-      --panel:#0b1824;
-      --panel-soft:#0f2232;
-      --line:rgba(96,202,255,.22);
-      --text:#e8f8ff;
-      --muted:#87afbf;
-      --accent:#61e8ff;
-      --accent2:#4f9bff;
-      --ok:#b8ffd0;
-      --ok-border:#7dffb4;
-      --danger:#ff889e;
-      --shadow:0 18px 60px rgba(0,0,0,.38);
-      --button-face-1:#56b8d9;
-      --button-face-2:#2a6f97;
-      --button-face-3:#194b69;
-      --button-dark-1:#243645;
-      --button-dark-2:#121d26;
-      --button-dashboard-border:#6f95ad;
-      --status-bg:#07121b;
-      --status-border:rgba(140,170,188,.22);
+      --bg-0:#071018;
+      --bg-1:#0b1620;
+      --bg-2:#101d28;
+      --line:rgba(151, 180, 201, .18);
+      --text:#eef4f8;
+      --muted:#9aafc1;
+      --accent:#2d8cff;
+      --accent-2:#23c7b6;
+      --ok:#8ff3bf;
+      --danger:#ff7f9d;
+      --warning:#f9cc72;
+      --shadow:0 24px 60px rgba(0, 0, 0, .34);
+      --button-primary-1:#4ea0ff;
+      --button-primary-2:#2467d0;
+      --button-primary-3:#194b9d;
+      --button-secondary-1:#405060;
+      --button-secondary-2:#273442;
+      --button-secondary-3:#1b2632;
     }
 
     * { box-sizing:border-box; }
+
     body {
       margin:0;
       min-height:100vh;
       overflow:hidden;
-      font-family:Bahnschrift,"Segoe UI",sans-serif;
+      font-family:"Segoe UI", "Helvetica Neue", sans-serif;
       color:var(--text);
       background:
-        radial-gradient(circle at top left, rgba(97,232,255,.14), transparent 34%),
-        radial-gradient(circle at bottom right, rgba(79,155,255,.12), transparent 28%),
-        linear-gradient(180deg,#06101a,#03070c);
+        radial-gradient(circle at top left, rgba(35, 199, 182, .11), transparent 28%),
+        radial-gradient(circle at top right, rgba(45, 140, 255, .14), transparent 32%),
+        linear-gradient(135deg, #08111a 0%, #0d1822 35%, #111f2a 100%);
     }
 
-    main {
-      width:min(99vw, 1742px);
-      height:min(96vh, 950px);
-      margin:2vh auto;
-      padding:19px;
-      border:1px solid var(--line);
-      border-radius:22px;
-      background:rgba(7,18,29,.86);
-      box-shadow:var(--shadow);
-      display:flex;
-      flex-direction:column;
-      gap:14px;
-      overflow:hidden;
-    }
-
-    .topbar {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:14px;
-      flex-wrap:wrap;
-      flex:0 0 auto;
-      position:sticky;
-      top:0;
-      z-index:5;
-      padding-bottom:10px;
-      background:linear-gradient(180deg, rgba(7,18,29,.98), rgba(7,18,29,.94) 72%, rgba(7,18,29,0));
-    }
-
-    .hero {
-      display:flex;
-      flex-direction:column;
-      gap:5px;
-    }
-
-    .label {
-      display:block;
-      margin-bottom:6px;
-      font-size:.75rem;
-      text-transform:uppercase;
-      letter-spacing:.14em;
-      color:var(--muted);
-    }
-
-    .eyebrow {
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.18em;
-      font-size:.69rem;
-    }
-
-    .title {
-      margin:0;
-      font-size:2.11rem;
-      text-transform:uppercase;
-      letter-spacing:.08em;
+    .shell-background {
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      background:
+        linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
+      background-size:34px 34px;
+      opacity:.22;
     }
 
     .splash-overlay {
@@ -108,9 +60,9 @@
       justify-content:center;
       padding:24px;
       background:
-        radial-gradient(circle at top, rgba(97,232,255,.22), transparent 36%),
-        radial-gradient(circle at bottom, rgba(79,155,255,.16), transparent 30%),
-        rgba(2, 8, 13, .92);
+        radial-gradient(circle at top, rgba(45, 140, 255, .18), transparent 32%),
+        radial-gradient(circle at bottom, rgba(35, 199, 182, .15), transparent 28%),
+        rgba(4, 10, 15, .92);
       transition:opacity .65s ease, visibility .65s ease;
     }
 
@@ -120,185 +72,274 @@
       pointer-events:none;
     }
 
+    .splash-card,
+    .hero-card,
+    .summary-card,
+    .panel,
+    .window-shell {
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(21, 35, 47, .94), rgba(12, 22, 31, .96));
+      box-shadow:var(--shadow);
+    }
+
     .splash-card {
-      width:min(92vw, 640px);
-      padding:34px 36px;
-      border-radius:26px;
-      border:1px solid rgba(97,232,255,.28);
-      background:
-        linear-gradient(180deg, rgba(15,34,50,.98), rgba(7,18,29,.98));
-      box-shadow:
-        0 28px 80px rgba(0,0,0,.44),
-        inset 0 1px 0 rgba(255,255,255,.08);
+      width:min(92vw, 680px);
+      padding:36px;
+      border-radius:30px;
       text-align:center;
     }
 
-    .splash-eyebrow {
-      color:var(--muted);
+    .splash-eyebrow,
+    .eyebrow,
+    .section-kicker,
+    .metric-label,
+    .k {
       text-transform:uppercase;
-      letter-spacing:.24em;
-      font-size:.76rem;
-      margin-bottom:12px;
+      letter-spacing:.18em;
+      font-size:.72rem;
+      color:var(--muted);
     }
 
     .splash-title {
-      margin:0;
-      font-size:2.2rem;
-      letter-spacing:.08em;
-      text-transform:uppercase;
+      margin:14px 0 0;
+      font-size:2.35rem;
+      letter-spacing:.05em;
+      font-weight:700;
     }
 
     .splash-divider {
-      width:96px;
-      height:2px;
-      margin:18px auto 22px;
-      background:linear-gradient(90deg, transparent, var(--accent), transparent);
+      width:112px;
+      height:3px;
+      margin:22px auto 24px;
+      border-radius:999px;
+      background:linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
     }
 
     .splash-grid {
       display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
       gap:12px;
       text-align:left;
     }
 
-    .splash-datum {
-      border-radius:15px;
-      border:1px solid rgba(96,202,255,.18);
-      background:rgba(4,13,21,.82);
-      padding:14px 16px;
+    .splash-datum,
+    .meta-card,
+    .metric-card,
+    .datum {
+      padding:14px;
+      border-radius:16px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(8, 17, 24, .68);
     }
 
-    .splash-datum .k {
-      color:var(--muted);
-      font-size:.73rem;
-      text-transform:uppercase;
-      letter-spacing:.14em;
-    }
-
-    .splash-datum .v {
-      margin-top:6px;
-      font-size:1rem;
+    .splash-datum .v,
+    .meta-value,
+    .metric-value,
+    .datum .v {
+      margin-top:8px;
+      font-size:1.04rem;
       font-weight:700;
-      color:var(--text);
       word-break:break-word;
     }
 
     .splash-note {
       margin-top:18px;
       color:var(--muted);
-      font-size:.92rem;
+      font-size:.95rem;
+    }
+
+    main {
+      width:min(98vw, 1820px);
+      height:min(96vh, 1020px);
+      margin:2vh auto;
+      padding:18px;
+      border-radius:28px;
+      border:1px solid rgba(151, 180, 201, .16);
+      background:rgba(10, 17, 24, .78);
+      backdrop-filter:blur(18px);
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+      overflow:hidden;
+    }
+
+    .dashboard-header {
+      display:grid;
+      grid-template-columns:minmax(0, 1.35fr) minmax(360px, .95fr);
+      gap:16px;
+      flex:0 0 auto;
+    }
+
+    .hero-card,
+    .summary-card {
+      border-radius:24px;
+      padding:20px 22px;
+      position:relative;
+      overflow:hidden;
+    }
+
+    .hero-top {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:18px;
+      flex-wrap:wrap;
+    }
+
+    .hero-title {
+      margin:8px 0 0;
+      font-size:2.4rem;
+      line-height:1.05;
       letter-spacing:.04em;
     }
 
-    .note, .flash {
-      color:var(--muted);
-      font-size:.96rem;
+    .hero-note,
+    .section-copy {
+      margin:12px 0 0;
+      color:#c8d7e3;
+      font-size:1rem;
+      line-height:1.6;
     }
 
-    .nav {
+    .hero-actions,
+    .status-inline,
+    .states,
+    .log-status {
       display:flex;
       gap:10px;
       flex-wrap:wrap;
     }
 
-    .nav button {
-      min-width:176px;
+    .meta-strip,
+    .summary-grid,
+    .config-grid,
+    .command-grid,
+    .data-grid {
+      display:grid;
+      gap:12px;
     }
 
-    .workspace {
+    .meta-strip {
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      margin-top:18px;
+    }
+
+    .summary-card {
       display:flex;
       flex-direction:column;
       gap:14px;
+    }
+
+    .summary-grid {
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+
+    .metric-value.large {
+      font-size:1.5rem;
+      line-height:1.1;
+    }
+
+    .status-chip {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(8, 17, 24, .75);
+      color:#d9e5ee;
+      font-size:.84rem;
+      font-weight:600;
+    }
+
+    .status-chip::before {
+      content:"";
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#607585;
+    }
+
+    .status-chip.ok::before { background:var(--ok); }
+    .status-chip.warn::before { background:var(--warning); }
+    .status-chip.danger::before { background:var(--danger); }
+
+    .workspace {
       flex:1;
       min-height:0;
       overflow:auto;
-      padding-right:4px;
+      padding-right:6px;
     }
 
     .window-stack {
       display:flex;
       flex-direction:column;
-      gap:14px;
+      gap:16px;
       min-height:min-content;
     }
 
     .window-shell {
-      display:flex;
-      flex-direction:column;
-      min-height:0;
-      border:1px solid rgba(96,202,255,.18);
-      border-radius:19px;
-      background:linear-gradient(180deg, rgba(8,18,28,.88), rgba(5,12,20,.9));
+      border-radius:24px;
       overflow:hidden;
-      box-shadow:var(--shadow);
-    }
-
-    #windowOperational,
-    #windowImportantData {
-      width:100%;
     }
 
     .window-shell.active-window {
-      border-color:rgba(125,255,180,.55);
-      box-shadow:
-        0 18px 60px rgba(0,0,0,.38),
-        0 0 0 1px rgba(125,255,180,.24);
+      border-color:rgba(45, 140, 255, .4);
+      box-shadow:var(--shadow), 0 0 0 1px rgba(45, 140, 255, .16);
     }
 
     .window-bar {
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:10px;
-      padding:11px 14px;
-      border-bottom:1px solid rgba(96,202,255,.16);
-      background:linear-gradient(180deg, rgba(18,36,52,.9), rgba(11,22,34,.92));
+      gap:12px;
+      padding:18px 20px;
+      border-bottom:1px solid rgba(151, 180, 201, .1);
+      background:linear-gradient(180deg, rgba(29, 51, 68, .9), rgba(17, 31, 43, .9));
     }
 
-    .window-title {
-      margin:0;
-      font-size:1.06rem;
-      letter-spacing:.08em;
-      text-transform:uppercase;
+    .window-title,
+    .section-title {
+      margin:8px 0 0;
+      font-size:1.12rem;
+      letter-spacing:.04em;
     }
 
     .window-content {
-      flex:1;
-      min-height:0;
-      padding:14px;
+      padding:18px;
       display:flex;
       flex-direction:column;
-      gap:14px;
+      gap:16px;
     }
 
     .operational-layout {
       display:grid;
-      grid-template-columns:1fr 1.08fr;
-      gap:14px;
-      width:100%;
+      grid-template-columns:minmax(0, 1.15fr) minmax(420px, .85fr);
+      gap:16px;
       min-height:0;
-      flex:1;
     }
 
     .panel {
-      border:1px solid var(--line);
-      border-radius:18px;
-      padding:16px;
-      background:linear-gradient(180deg, rgba(10,24,38,.96), rgba(7,16,25,.94));
+      border-radius:20px;
+      padding:18px;
       min-height:0;
     }
 
     .panel.stack {
       display:flex;
       flex-direction:column;
-      justify-content:flex-start;
-      align-items:stretch;
+      gap:14px;
     }
 
-    .logger-panel {
-      height:100%;
-      min-height:624px;
-      max-height:624px;
+    .section-header {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:14px;
+      flex-wrap:wrap;
     }
 
     .row {
@@ -308,275 +349,241 @@
       align-items:end;
     }
 
-    input {
-      width:176px;
-      height:38px;
-      border-radius:11px;
-      border:1px solid rgba(96,202,255,.26);
-      background:#03111c;
-      color:var(--text);
-      padding:0 11px;
-      font-size:.96rem;
+    .group-card,
+    .state-group {
+      padding:16px;
+      border-radius:18px;
+      border:1px solid rgba(151, 180, 201, .12);
+      background:rgba(7, 15, 22, .56);
+    }
+
+    .label {
+      display:block;
+      margin-bottom:6px;
+      color:var(--muted);
+      font-size:.74rem;
+      text-transform:uppercase;
+      letter-spacing:.16em;
     }
 
     .config-grid {
-      display:grid;
-      gap:10px;
       grid-template-columns:repeat(3, minmax(0, 1fr));
-      margin-top:14px;
+    }
+
+    .command-grid {
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+    }
+
+    input {
+      width:100%;
+      min-height:42px;
+      border-radius:12px;
+      border:1px solid rgba(151, 180, 201, .2);
+      background:#09131c;
+      color:var(--text);
+      padding:0 13px;
+      font-size:.96rem;
+      outline:none;
+    }
+
+    input:focus {
+      border-color:rgba(45, 140, 255, .55);
+      box-shadow:0 0 0 3px rgba(45, 140, 255, .14);
+      background:#0d1822;
     }
 
     button {
-      min-height:37px;
-      border-radius:11px;
-      border:1px solid rgba(111,149,173,.48);
-      padding:0 14px;
+      min-height:40px;
+      border-radius:12px;
+      border:1px solid rgba(120, 150, 172, .28);
+      padding:0 15px;
       font-weight:700;
-      font-size:.88rem;
+      font-size:.84rem;
       letter-spacing:.08em;
       text-transform:uppercase;
-      color:#e8f8ff;
+      color:#f4f8fb;
       background:
-        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 28%),
-        linear-gradient(180deg, var(--button-face-1), var(--button-face-2) 58%, var(--button-face-3));
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.14),
-        inset 0 -1px 0 rgba(0,0,0,.22),
-        0 6px 14px rgba(0,0,0,.18);
+        linear-gradient(180deg, rgba(255,255,255,.1), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, var(--button-primary-1), var(--button-primary-2) 56%, var(--button-primary-3));
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 10px 20px rgba(0,0,0,.16);
       cursor:pointer;
+      transition:transform .16s ease, filter .16s ease;
+    }
+
+    button.secondary {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, var(--button-secondary-1), var(--button-secondary-2) 56%, var(--button-secondary-3));
     }
 
     button.pending {
-      color:#d8e7f3;
       background:
-        linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 30%),
-        linear-gradient(180deg, var(--button-dark-1), var(--button-dark-2));
-      border-color:rgba(111,149,173,.24);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.06),
-        inset 0 -1px 0 rgba(0,0,0,.28),
-        0 5px 12px rgba(0,0,0,.14);
+        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, #445260, #27313c 56%, #1a232b);
     }
 
     button.success {
-      color:#10301d;
+      color:#0d3020;
       background:
-        linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0) 30%),
-        linear-gradient(180deg, rgba(208,255,223,.96), rgba(149,238,181,.94));
-      border-color:rgba(125,255,180,.82);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.35),
-        inset 0 -1px 0 rgba(0,0,0,.12),
-        0 5px 12px rgba(68,162,109,.18);
+        linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, #d8ffe7, #98efba 56%, #6fdb9a);
     }
 
     button.failure {
-      color:#3a0711;
+      color:#3e0915;
       background:
         linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 30%),
-        linear-gradient(180deg, rgba(255,186,196,.96), rgba(232,108,129,.94));
-      border-color:rgba(255,136,158,.82);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.32),
-        inset 0 -1px 0 rgba(0,0,0,.12),
-        0 5px 12px rgba(176,66,98,.16);
+        linear-gradient(180deg, #ffd3dc, #ff91aa 56%, #e96785);
     }
 
     button:hover {
-      filter:brightness(1.07);
       transform:translateY(-1px);
+      filter:brightness(1.05);
     }
 
     button:active {
       transform:translateY(1px);
-      box-shadow:
-        inset 0 2px 5px rgba(0,0,0,.28),
-        0 3px 8px rgba(0,0,0,.14);
-    }
-
-    button.secondary,
-    .state-pill {
-      color:inherit;
-    }
-
-    .actions,
-    .states {
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      margin-top:13px;
-    }
-
-    .state-group {
-      margin-top:14px;
-      padding:13px;
-      border-radius:14px;
-      border:1px solid var(--status-border);
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0) 28%),
-        linear-gradient(180deg, rgba(10,20,30,.96), rgba(6,12,19,.98));
     }
 
     .state-pill {
-      min-height:37px;
-      min-width:109px;
+      min-height:39px;
+      min-width:112px;
       display:flex;
       align-items:center;
       justify-content:center;
       padding:0 14px;
-      border-radius:11px;
+      border-radius:999px;
+      border:1px solid rgba(151, 180, 201, .14);
+      background:rgba(20, 34, 46, .92);
+      color:#d9e5ee;
       text-transform:uppercase;
       letter-spacing:.08em;
-      font-size:.82rem;
+      font-size:.78rem;
       font-weight:700;
-      color:#d2dde7;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 34%),
-        linear-gradient(180deg, #1e2d39, #101b24);
-      border:1px solid rgba(130,154,170,.18);
     }
 
     .state-pill.active {
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0) 34%),
-        linear-gradient(180deg, rgba(208,255,223,.96), rgba(149,238,181,.94));
-      color:#10301d;
-      border-color:rgba(125,255,180,.82);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.4),
-        inset 0 -2px 0 rgba(0,0,0,.14),
-        0 0 18px rgba(125,255,180,.16);
+      color:#0e3021;
+      background:linear-gradient(180deg, #dfffee, #94ebb7);
+      border-color:rgba(143, 243, 191, .9);
     }
 
     .state-pill.in-progress {
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0) 34%),
-        linear-gradient(180deg, rgba(149,238,181,.96), rgba(92,214,136,.94));
-      color:#0d2c18;
-      border-color:rgba(125,255,180,.82);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.36),
-        inset 0 -2px 0 rgba(0,0,0,.14),
-        0 0 18px rgba(125,255,180,.18);
-      animation: stateBlink 1s ease-in-out infinite;
+      color:#0d2c28;
+      background:linear-gradient(180deg, #dbfff7, #74e5cf);
+      border-color:rgba(35, 199, 182, .88);
+      animation:stateBlink 1s ease-in-out infinite;
     }
 
     .state-pill.error-state {
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0) 34%),
-        linear-gradient(180deg, rgba(255,186,196,.96), rgba(232,108,129,.94));
-      color:#3a0711;
-      border-color:rgba(255,136,158,.82);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.36),
-        inset 0 -2px 0 rgba(0,0,0,.14),
-        0 0 18px rgba(255,136,158,.14);
+      color:#3e0915;
+      background:linear-gradient(180deg, #ffd7df, #ff8ba4);
+      border-color:rgba(255, 127, 157, .9);
     }
 
-    @keyframes stateBlink {
-      0% { opacity: 1; }
-      50% { opacity: .45; }
-      100% { opacity: 1; }
-    }
-
-    .logger-header {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      margin-bottom:10px;
-    }
-
-    .logger-header .label {
-      margin-bottom:0;
-    }
-
-    .data-grid {
-      display:grid;
-      grid-template-columns:repeat(3, minmax(0, 1fr));
-      gap:10px;
-      margin-top:5px;
-      align-content:start;
-    }
-
-    .datum {
-      border-radius:13px;
-      border:1px solid rgba(96,202,255,.18);
-      background:rgba(6,19,31,.86);
-      padding:11px;
-      min-height:82px;
-    }
-
-    .datum .k {
-      color:var(--muted);
-      font-size:.71rem;
-      text-transform:uppercase;
-      letter-spacing:.12em;
-    }
-
-    .datum .v {
-      margin-top:6px;
-      font-size:.96rem;
-      font-weight:600;
-      word-break:break-word;
+    .logger-panel {
+      min-height:700px;
+      max-height:700px;
     }
 
     pre {
       margin:0;
       flex:1;
       min-height:0;
-      align-self:stretch;
       overflow:auto;
-      border-radius:16px;
-      border:1px solid rgba(96,202,255,.18);
-      background:#020a11;
+      border-radius:18px;
+      border:1px solid rgba(151, 180, 201, .12);
+      background:#061019;
       padding:16px;
-      color:#c9f2ff;
-      font-family:Consolas,"Cascadia Mono",monospace;
-      font-size:.97rem;
+      color:#d8efff;
+      font-family:"Cascadia Mono", Consolas, monospace;
+      font-size:.95rem;
+      line-height:1.5;
       white-space:pre-wrap;
     }
 
-    @media (max-width: 1500px) {
-      main {
-        width:min(98vw, 1628px);
-      }
+    .data-grid {
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+    }
 
-      .workspace,
+    .datum.emphasis {
+      background:
+        linear-gradient(180deg, rgba(45, 140, 255, .16), rgba(45, 140, 255, .04)),
+        rgba(8, 17, 24, .84);
+      border-color:rgba(45, 140, 255, .22);
+    }
+
+    .flash-banner {
+      min-height:48px;
+      display:flex;
+      align-items:center;
+      padding:0 16px;
+      border-radius:14px;
+      border:1px solid rgba(151, 180, 201, .12);
+      background:rgba(7, 15, 22, .62);
+      color:#d8e5ef;
+      font-size:.95rem;
+    }
+
+    .flash-banner.error {
+      border-color:rgba(255, 127, 157, .26);
+      background:rgba(64, 16, 28, .48);
+      color:#ffd5de;
+    }
+
+    @keyframes stateBlink {
+      0% { opacity:1; }
+      50% { opacity:.48; }
+      100% { opacity:1; }
+    }
+
+    @media (max-width: 1520px) {
+      .dashboard-header,
       .operational-layout {
         grid-template-columns:1fr;
       }
 
+      .meta-strip,
       .data-grid {
         grid-template-columns:repeat(2, minmax(0, 1fr));
       }
     }
 
-    @media (max-width: 780px) {
+    @media (max-width: 920px) {
+      body { overflow:auto; }
+
       main {
-        width:min(99vw, 1628px);
-        height:96vh;
-        margin:2vh auto;
-        padding:18px;
+        height:auto;
+        min-height:100vh;
+        margin:0;
+        width:100%;
+        border-radius:0;
       }
 
+      .splash-grid,
+      .meta-strip,
+      .summary-grid,
       .config-grid,
+      .command-grid,
       .data-grid {
         grid-template-columns:1fr;
       }
 
-      input {
-        width:100%;
+      .hero-actions button,
+      .command-grid button {
+        flex:1;
       }
 
-      .nav button {
-        min-width:0;
-        flex:1;
+      .logger-panel {
+        min-height:520px;
+        max-height:none;
       }
     }
   </style>
 </head>
 <body>
+  <div class="shell-background"></div>
+
   <div id="splashOverlay" class="splash-overlay">
     <section class="splash-card">
       <div class="splash-eyebrow">Startup Splash</div>
@@ -600,20 +607,73 @@
           <div id="splashBuildTimestamp" class="v">Loading...</div>
         </div>
       </div>
-      <div class="splash-note">The operational console will appear automatically after 5 seconds.</div>
+      <div class="splash-note">The operational dashboard will appear automatically after 5 seconds.</div>
     </section>
   </div>
+
   <main>
-    <section class="topbar">
-      <div class="hero">
-        <div class="eyebrow">Transport-First Simulator</div>
-        <h1 class="title">ESP32-C3 Console</h1>
-        <div class="note">Two-screen operator surface for transport control, logger visibility, and runtime telemetry.</div>
-      </div>
-      <div class="nav">
-        <button id="navOperational" type="button">Operational</button>
-        <button id="navImportantData" type="button" class="secondary">Important Data</button>
-      </div>
+    <section class="dashboard-header">
+      <section class="hero-card">
+        <div class="hero-top">
+          <div>
+            <div class="eyebrow">Professional Operator Dashboard</div>
+            <h1 class="hero-title">Eyal Espresso Server Simulator</h1>
+            <p class="hero-note">Focused runtime surface for transport control, simulator lifecycle actions, logger visibility, and high-signal telemetry during validation.</p>
+          </div>
+          <div class="hero-actions">
+            <button id="navOperational" type="button">Operational</button>
+            <button id="navImportantData" type="button" class="secondary">Important Data</button>
+          </div>
+        </div>
+        <div class="meta-strip">
+          <div class="meta-card">
+            <div class="metric-label">Application Version</div>
+            <div id="dashboardAppVersion" class="meta-value">Loading...</div>
+          </div>
+          <div class="meta-card">
+            <div class="metric-label">Firmware Version</div>
+            <div id="dashboardFirmwareVersion" class="meta-value">Loading...</div>
+          </div>
+          <div class="meta-card">
+            <div class="metric-label">Build Timestamp</div>
+            <div id="dashboardBuildTimestamp" class="meta-value">Loading...</div>
+          </div>
+          <div class="meta-card">
+            <div class="metric-label">Environment</div>
+            <div class="meta-value">Local Validation</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="summary-card">
+        <div>
+          <div class="section-kicker">Runtime Summary</div>
+          <h2 class="section-title">Live Status</h2>
+        </div>
+        <div class="summary-grid">
+          <div class="metric-card">
+            <div class="metric-label">Current State</div>
+            <div id="summaryCurrentState" class="metric-value large">Loading...</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Serial Port</div>
+            <div id="summarySerialPort" class="metric-value large">COM4</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Logger Lines</div>
+            <div id="summaryLoggerCount" class="metric-value large">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Keepalive</div>
+            <div id="summaryKeepalive" class="metric-value large">100 ms</div>
+          </div>
+        </div>
+        <div class="status-inline">
+          <div id="statusTransport" class="status-chip warn">Transport Idle</div>
+          <div id="statusLogger" class="status-chip ok">Logger Live</div>
+          <div id="statusHealth" class="status-chip ok">Backend Healthy</div>
+        </div>
+      </aside>
     </section>
 
     <section class="workspace">
@@ -622,55 +682,107 @@
           <div class="window-bar">
             <div>
               <div class="eyebrow">Screen 1</div>
-              <h2 class="window-title">Operational</h2>
+              <h2 class="window-title">Operational Control</h2>
+            </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Event Monitoring Enabled</div>
+              <div class="status-chip ok">Logger Monitoring Enabled</div>
             </div>
           </div>
           <div class="window-content">
             <div class="operational-layout">
-          <section class="panel">
-            <div class="label">Operational</div>
-            <div class="row">
-              <label><span class="label">Serial Port</span><input id="serialPort" type="text" value="COM4"></label>
-              <button id="openButton" type="button">Open Port</button>
-              <button id="closeButton" type="button" class="secondary">Close Port</button>
-            </div>
+              <section class="panel">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Transport Console</div>
+                    <h3 class="section-title">Link Configuration and Lifecycle</h3>
+                    <p class="section-copy">Configure the active serial link, runtime network targets, and transport timing before driving the simulator state machine.</p>
+                  </div>
+                </div>
 
-            <div class="config-grid">
-              <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
-              <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
-              <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
-              <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
-              <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
-              <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
-            </div>
+                <div class="group-card">
+                  <div class="section-header">
+                    <div>
+                      <div class="section-kicker">Endpoint</div>
+                      <h3 class="section-title">Serial Port Ownership</h3>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <label style="flex:1 1 220px">
+                      <span class="label">Serial Port</span>
+                      <input id="serialPort" type="text" value="COM4">
+                    </label>
+                    <button id="openButton" type="button">Open Port</button>
+                    <button id="closeButton" type="button" class="secondary">Close Port</button>
+                  </div>
+                </div>
 
-            <div class="row" style="margin-top:12px">
-              <label><span class="label">Keepalive ms</span><input id="keepaliveMs" type="text" value="100"></label>
-              <button id="applyConfigButton" type="button">Apply Transport Config</button>
-            </div>
+                <div class="group-card">
+                  <div class="section-header">
+                    <div>
+                      <div class="section-kicker">Transport Profile</div>
+                      <h3 class="section-title">Wi-Fi and Server Parameters</h3>
+                    </div>
+                  </div>
+                  <div class="config-grid">
+                    <label><span class="label">Wi-Fi SSID</span><input id="wifiSsid" type="text" value="EyalSimulatorAP"></label>
+                    <label><span class="label">Wi-Fi Password</span><input id="wifiPassword" type="text" value="espresso1234"></label>
+                    <label><span class="label">Server IP</span><input id="serverIp" type="text" value="192.168.4.1"></label>
+                    <label><span class="label">Server Port</span><input id="serverPort" type="text" value="3333"></label>
+                    <label><span class="label">Wi-Fi Timeout ms</span><input id="wifiTimeout" type="text" value="10000"></label>
+                    <label><span class="label">TCP Timeout ms</span><input id="tcpTimeout" type="text" value="3000"></label>
+                  </div>
+                  <div class="row" style="margin-top:12px">
+                    <label style="flex:1 1 220px">
+                      <span class="label">Keepalive ms</span>
+                      <input id="keepaliveMs" type="text" value="100">
+                    </label>
+                    <button id="applyConfigButton" type="button">Apply Transport Config</button>
+                  </div>
+                </div>
 
-            <div class="actions">
-              <button id="resetButton" type="button">Reset</button>
-              <button id="initializeButton" type="button" class="secondary">Initialize</button>
-              <button id="connectButton" type="button">Connect</button>
-              <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
-              <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
-            </div>
+                <div class="group-card">
+                  <div class="section-header">
+                    <div>
+                      <div class="section-kicker">Lifecycle Actions</div>
+                      <h3 class="section-title">State Command Surface</h3>
+                    </div>
+                  </div>
+                  <div class="command-grid">
+                    <button id="resetButton" type="button">Reset</button>
+                    <button id="initializeButton" type="button" class="secondary">Initialize</button>
+                    <button id="connectButton" type="button">Connect</button>
+                    <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
+                    <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
+                  </div>
+                </div>
 
-            <section class="state-group">
-              <div class="label">Machine State</div>
-              <div id="states" class="states"></div>
-            </section>
-            <div id="flash" class="flash" style="margin-top:14px"></div>
-          </section>
+                <section class="state-group">
+                  <div class="section-header">
+                    <div>
+                      <div class="section-kicker">Machine State</div>
+                      <h3 class="section-title">State Progression View</h3>
+                    </div>
+                  </div>
+                  <div id="states" class="states"></div>
+                </section>
 
-          <section class="panel stack logger-panel">
-            <div class="logger-header">
-              <div class="label">Logger Output</div>
-              <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
-            </div>
-            <pre id="logWindow">Loading transport snapshot...</pre>
-          </section>
+                <div id="flash" class="flash-banner">Waiting for transport snapshot...</div>
+              </section>
+
+              <section class="panel stack logger-panel">
+                <div class="logger-header">
+                  <div>
+                    <div class="section-kicker">Logger</div>
+                    <h3 class="section-title">Runtime Event Stream</h3>
+                  </div>
+                  <div class="log-status">
+                    <div id="loggerModePill" class="status-chip ok">Logger Live</div>
+                    <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
+                  </div>
+                </div>
+                <pre id="logWindow">Loading transport snapshot...</pre>
+              </section>
             </div>
           </div>
         </section>
@@ -681,12 +793,21 @@
               <div class="eyebrow">Screen 2</div>
               <h2 class="window-title">Important Data</h2>
             </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Snapshot Refresh 1s</div>
+            </div>
           </div>
           <div class="window-content">
-        <section class="panel stack" style="width:100%">
-          <div class="label">Important Data</div>
-          <div id="importantData" class="data-grid"></div>
-        </section>
+            <section class="panel stack">
+              <div class="section-header">
+                <div>
+                  <div class="section-kicker">Telemetry</div>
+                  <h3 class="section-title">High-Signal Runtime Data</h3>
+                  <p class="section-copy">Operator-facing summary of the simulator data model, transport values, and live control context.</p>
+                </div>
+              </div>
+              <div id="importantData" class="data-grid"></div>
+            </section>
           </div>
         </section>
       </div>
@@ -727,20 +848,24 @@
       splashVersion: document.getElementById('splashVersion'),
       splashFirmwareVersion: document.getElementById('splashFirmwareVersion'),
       splashBuildTimestamp: document.getElementById('splashBuildTimestamp'),
+      dashboardAppVersion: document.getElementById('dashboardAppVersion'),
+      dashboardFirmwareVersion: document.getElementById('dashboardFirmwareVersion'),
+      dashboardBuildTimestamp: document.getElementById('dashboardBuildTimestamp'),
+      summaryCurrentState: document.getElementById('summaryCurrentState'),
+      summarySerialPort: document.getElementById('summarySerialPort'),
+      summaryLoggerCount: document.getElementById('summaryLoggerCount'),
+      summaryKeepalive: document.getElementById('summaryKeepalive'),
+      statusTransport: document.getElementById('statusTransport'),
+      statusLogger: document.getElementById('statusLogger'),
+      statusHealth: document.getElementById('statusHealth'),
+      loggerModePill: document.getElementById('loggerModePill'),
     };
+
     let latestLogs = [];
     let loggerPaused = false;
     let stateVisuals = {};
-    const asyncButtons = [
-      'openButton',
-      'closeButton',
-      'applyConfigButton',
-      'resetButton',
-      'initializeButton',
-      'connectButton',
-      'disconnectButton',
-      'keepaliveButton',
-    ];
+
+    const asyncButtons = ['openButton', 'closeButton', 'applyConfigButton', 'resetButton', 'initializeButton', 'connectButton', 'disconnectButton', 'keepaliveButton'];
     const commandStateMap = {
       resetButton: 'reset',
       initializeButton: 'initialize',
@@ -759,14 +884,23 @@
       return callJson('/api/link');
     }
 
+    function setChipState(element, tone, label) {
+      element.classList.remove('ok', 'warn', 'danger');
+      if (tone) element.classList.add(tone);
+      element.textContent = label;
+    }
+
     async function loadSplashInfo() {
       try {
         const info = await callJson('/api/app-info');
         elements.splashAppName.textContent = info.app_name;
         elements.splashAppLabel.textContent = info.app_name;
         elements.splashVersion.textContent = info.version;
-        elements.splashFirmwareVersion.textContent = info.firmware_version;
+        elements.splashFirmwareVersion.textContent = info.firmware_version || 'Unknown';
         elements.splashBuildTimestamp.textContent = info.build_timestamp;
+        elements.dashboardAppVersion.textContent = info.version;
+        elements.dashboardFirmwareVersion.textContent = info.firmware_version || 'Unknown';
+        elements.dashboardBuildTimestamp.textContent = info.build_timestamp;
         document.title = info.app_name;
       } catch (error) {
         elements.splashAppName.textContent = 'Simulator Startup';
@@ -774,6 +908,9 @@
         elements.splashVersion.textContent = 'Unknown';
         elements.splashFirmwareVersion.textContent = 'Unknown';
         elements.splashBuildTimestamp.textContent = 'Unavailable';
+        elements.dashboardAppVersion.textContent = 'Unknown';
+        elements.dashboardFirmwareVersion.textContent = 'Unknown';
+        elements.dashboardBuildTimestamp.textContent = 'Unavailable';
       }
     }
 
@@ -785,7 +922,7 @@
 
     function setFlash(message, error = false) {
       elements.flash.textContent = message;
-      elements.flash.style.color = error ? 'var(--danger)' : 'var(--ok)';
+      elements.flash.classList.toggle('error', error);
     }
 
     function setFlashFromSnapshot(snapshot, fallback = 'Updated.') {
@@ -796,25 +933,23 @@
 
     function syncLoggerToggle() {
       elements.loggerToggleButton.textContent = loggerPaused ? 'Resume Logger' : 'Pause Logger';
+      setChipState(elements.loggerModePill, loggerPaused ? 'warn' : 'ok', loggerPaused ? 'Logger Paused' : 'Logger Live');
+      setChipState(elements.statusLogger, loggerPaused ? 'warn' : 'ok', loggerPaused ? 'Logger Paused' : 'Logger Live');
     }
 
     function clearButtonState(button) {
-      button.classList.remove('pending');
+      button.classList.remove('pending', 'success', 'failure');
     }
 
     function setButtonState(button, state) {
       clearButtonState(button);
-      if (state) {
-        button.classList.add(state);
-      }
+      if (state) button.classList.add(state);
     }
 
     function resetAsyncButtonStates(exceptButton = null) {
       asyncButtons.forEach((key) => {
         const button = elements[key];
-        if (button && button !== exceptButton) {
-          clearButtonState(button);
-        }
+        if (button && button !== exceptButton) clearButtonState(button);
       });
     }
 
@@ -823,22 +958,13 @@
       snapshot.available_states.forEach((state) => {
         next[state] = 'inactive';
       });
-
-      if (snapshot.current_state) {
-        next[snapshot.current_state] = snapshot.last_error ? 'failure' : 'success';
-      }
-
-      if (!snapshot.last_error && snapshot.current_state === 'reset') {
-        next.reset = 'inactive';
-      }
-
+      if (snapshot.current_state) next[snapshot.current_state] = snapshot.last_error ? 'failure' : 'success';
+      if (!snapshot.last_error && snapshot.current_state === 'reset') next.reset = 'inactive';
       stateVisuals = next;
     }
 
     function setStateVisual(stateName, visual) {
-      if (!stateName) {
-        return;
-      }
+      if (!stateName) return;
       Object.keys(stateVisuals).forEach((key) => {
         stateVisuals[key] = key === stateName ? visual : 'inactive';
       });
@@ -861,13 +987,9 @@
         const pill = document.createElement('div');
         const visual = stateVisuals[state] || 'inactive';
         let className = 'state-pill';
-        if (visual === 'success') {
-          className += ' active';
-        } else if (visual === 'progress') {
-          className += ' in-progress';
-        } else if (visual === 'failure') {
-          className += ' error-state';
-        }
+        if (visual === 'success') className += ' active';
+        else if (visual === 'progress') className += ' in-progress';
+        else if (visual === 'failure') className += ' error-state';
         pill.className = className;
         pill.textContent = state;
         elements.states.appendChild(pill);
@@ -876,25 +998,40 @@
 
     function renderImportantData(snapshot) {
       elements.importantData.innerHTML = '';
-      Object.entries(snapshot.important_data).forEach(([key, value]) => {
+      const entries = Object.entries(snapshot.important_data);
+      entries.forEach(([key, value], index) => {
         const card = document.createElement('div');
-        card.className = 'datum';
+        card.className = `datum${index < 4 ? ' emphasis' : ''}`;
         card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`;
         elements.importantData.appendChild(card);
       });
     }
 
+    function updateSummary(snapshot) {
+      const transport = snapshot.transport || {};
+      elements.summaryCurrentState.textContent = snapshot.current_state || 'unknown';
+      elements.summarySerialPort.textContent = snapshot.config.serial_port || 'N/A';
+      elements.summaryLoggerCount.textContent = String(latestLogs.length);
+      elements.summaryKeepalive.textContent = `${snapshot.config.keepalive_period_ms} ms`;
+
+      if (snapshot.last_error) setChipState(elements.statusTransport, 'danger', 'Transport Error');
+      else if (transport.port_open) setChipState(elements.statusTransport, 'ok', `Port Open: ${snapshot.config.serial_port}`);
+      else setChipState(elements.statusTransport, 'warn', 'Transport Idle');
+
+      setChipState(elements.statusHealth, 'ok', 'Backend Healthy');
+    }
+
     function render(snapshot) {
-      if (!Object.keys(stateVisuals).length) {
-        resetStateVisuals(snapshot);
-      }
+      if (!Object.keys(stateVisuals).length) resetStateVisuals(snapshot);
       renderStates(snapshot);
       renderImportantData(snapshot);
+
       latestLogs = Array.isArray(snapshot.logs) ? snapshot.logs.slice(0, 2000) : [];
       if (!loggerPaused) {
         elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
         elements.logWindow.scrollTop = 0;
       }
+
       elements.serialPort.value = snapshot.config.serial_port;
       elements.wifiSsid.value = snapshot.config.wifi_ssid;
       elements.wifiPassword.value = snapshot.config.wifi_password;
@@ -903,12 +1040,15 @@
       elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms;
       elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms;
       elements.keepaliveMs.value = snapshot.config.keepalive_period_ms;
+
+      updateSummary(snapshot);
     }
 
     async function refresh() {
       try {
         render(await snapshot());
       } catch (error) {
+        setChipState(elements.statusHealth, 'danger', 'Backend Error');
         setFlash(error.message, true);
       }
     }
@@ -926,25 +1066,25 @@
       try {
         const payload = await callJson(
           url,
-          body
-            ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-            : { method: 'POST' }
+          body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method: 'POST' }
         );
         resetStateVisuals(payload);
-        if (targetState) {
-          setStateVisual(targetState, payload.last_error ? 'failure' : 'success');
-        }
+        if (targetState) setStateVisual(targetState, payload.last_error ? 'failure' : 'success');
         render(payload);
         setFlashFromSnapshot(payload, `Updated via ${url}.`);
+        if (button) {
+          setButtonState(button, payload.last_error ? 'failure' : 'success');
+          window.setTimeout(() => clearButtonState(button), 700);
+        }
       } catch (error) {
         setFlash(error.message, true);
         if (targetState) {
           setStateVisual(targetState, 'failure');
           renderStates({ available_states: Object.keys(stateVisuals), current_state: targetState });
         }
-      } finally {
         if (button) {
-          clearButtonState(button);
+          setButtonState(button, 'failure');
+          window.setTimeout(() => clearButtonState(button), 900);
         }
       }
     }
