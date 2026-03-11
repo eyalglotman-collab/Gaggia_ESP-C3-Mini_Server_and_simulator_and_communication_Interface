@@ -2,10 +2,19 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.9\par
-- Summary: Reorganized the simulator UI into three screen groups with corrected top-navigation scrolling and denser operator controls.\par
+- Version: 0.1.10\par
+- Summary: Reworked the server transport flow into reset, initialize, connect, keepalive, send-data, and reset-only error recovery with aligned UI and shared interface extraction.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 16:20:00\b0\par
+- Version: 0.1.10\par
+- Firmware Version: 0.1.10\par
+- Summary: Reworked the server-state transport flow, extracted the shared ServerInterface layer, and aligned the operator UI with the implemented low-level behavior.\par
+- Notes: Added the `ServerInterface` shared framing module and portable native protocol headers for later MCU reuse, converted the simulator runtime from the old disconnect-based flow to reset, initialize, connect, keepalive, send-data, and error states, made initialize auto-issue connect and wait for the ESP response, restricted error recovery to reset only, added the Send Data API route and UI button, renamed Machine State to Server States, updated the architecture baselines and regenerated the detailed design document, and kept serial reset behavior clearing buffered transport data before the next session.\par
+- Resolved Defects:\par
+  - FLOW-20260311-1: The simulator still exposed a disconnect-centered transport state model that no longer matched the intended ESP controller workflow.\par
+  - IFACE-20260311-1: Protocol framing rules were embedded only under the server transport package instead of living in a reusable shared interface boundary for later MCU integration.\par
+\par
 \b 2026-03-11 14:46:59\b0\par
 - Version: 0.1.9\par
 - Firmware Version: 0.1.9\par

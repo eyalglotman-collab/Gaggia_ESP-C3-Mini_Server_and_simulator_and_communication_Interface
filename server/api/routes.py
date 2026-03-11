@@ -95,16 +95,17 @@ def command_initialize() -> dict[str, object]:
     return _run_snapshot_action("command_initialize", link_runtime.initialize)
 
 
-@router.post("/command/connect")
-def command_connect() -> dict[str, object]:
-    return _run_snapshot_action("command_connect", link_runtime.connect)
-
-
-@router.post("/command/disconnect")
-def command_disconnect() -> dict[str, object]:
-    return _run_snapshot_action("command_disconnect", link_runtime.disconnect)
-
-
 @router.post("/command/keepalive")
 def command_keepalive() -> dict[str, object]:
     return _run_snapshot_action("command_keepalive", link_runtime.send_keepalive)
+
+
+@router.post("/command/send-data")
+def command_send_data() -> dict[str, object]:
+    """@brief Trigger one server-side DATA transmit action.
+
+    @details The low-level runtime exposes this route only after the ESP
+    controller has reached keepalive-ready connection state.
+    """
+
+    return _run_snapshot_action("command_send_data", link_runtime.send_data)

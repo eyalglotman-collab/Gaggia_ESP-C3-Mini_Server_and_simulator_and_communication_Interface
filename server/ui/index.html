@@ -475,6 +475,23 @@
         linear-gradient(180deg, var(--button-secondary-1), var(--button-secondary-2) 56%, var(--button-secondary-3));
     }
 
+    .hero-actions button {
+      min-width:120px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, #546271, #36424e 56%, #222c35);
+      border-color:rgba(176, 196, 210, .22);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.1), 0 8px 18px rgba(0,0,0,.14);
+    }
+
+    .hero-actions button.secondary {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 30%),
+        linear-gradient(180deg, #455260, #2d3842 56%, #1d252d);
+      border-color:rgba(151, 180, 201, .18);
+      filter:none;
+    }
+
     button.pending {
       background:
         linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 30%),
@@ -810,7 +827,7 @@
                       <input id="serialPort" type="text" value="COM4">
                     </label>
                     <button id="openButton" type="button">Open Port</button>
-                    <button id="closeButton" type="button" class="secondary">Close Port</button>
+                    <button id="closeButton" type="button">Close Port</button>
                   </div>
                 </div>
 
@@ -867,18 +884,17 @@
                   </div>
                   <div class="command-grid">
                     <button id="resetButton" type="button">Reset</button>
-                    <button id="initializeButton" type="button" class="secondary">Initialize</button>
-                    <button id="connectButton" type="button">Connect</button>
-                    <button id="disconnectButton" type="button" class="secondary">Disconnect</button>
-                    <button id="keepaliveButton" type="button" class="secondary">Keepalive</button>
+                    <button id="initializeButton" type="button">Initialize</button>
+                    <button id="keepaliveButton" type="button">Keepalive</button>
+                    <button id="sendDataButton" type="button">Send Data</button>
                   </div>
                 </section>
 
                 <section class="panel stack">
                   <div class="section-header">
                     <div>
-                      <div class="section-kicker">Machine State</div>
-                      <h3 class="section-title">State Progression View</h3>
+                      <div class="section-kicker">Server States</div>
+                      <h3 class="section-title">Server State Progression View</h3>
                     </div>
                   </div>
                   <div id="states" class="states"></div>
@@ -893,7 +909,7 @@
                   </div>
                   <div class="log-status">
                     <div id="loggerModePill" class="status-chip ok">Logger Live</div>
-                    <button id="loggerToggleButton" type="button" class="secondary logger-button">Pause Logger</button>
+                    <button id="loggerToggleButton" type="button" class="logger-button">Pause Logger</button>
                   </div>
                 </div>
                 <pre id="logWindow">Loading transport snapshot...</pre>
@@ -944,9 +960,8 @@
       closeButton: document.getElementById('closeButton'),
       resetButton: document.getElementById('resetButton'),
       initializeButton: document.getElementById('initializeButton'),
-      connectButton: document.getElementById('connectButton'),
-      disconnectButton: document.getElementById('disconnectButton'),
       keepaliveButton: document.getElementById('keepaliveButton'),
+      sendDataButton: document.getElementById('sendDataButton'),
       loggerToggleButton: document.getElementById('loggerToggleButton'),
       navOperational: document.getElementById('navOperational'),
       navLifecycle: document.getElementById('navLifecycle'),
@@ -979,12 +994,12 @@
     let loggerPaused = false;
     let stateVisuals = {};
 
-    const asyncButtons = ['openButton', 'closeButton', 'applyConfigButton', 'resetButton', 'initializeButton', 'connectButton', 'disconnectButton', 'keepaliveButton'];
+    const asyncButtons = ['openButton', 'closeButton', 'applyConfigButton', 'resetButton', 'initializeButton', 'keepaliveButton', 'sendDataButton'];
     const commandStateMap = {
       resetButton: 'reset',
       initializeButton: 'initialize',
-      connectButton: 'connect',
-      disconnectButton: 'disconnect',
+      keepaliveButton: 'keepalive',
+      sendDataButton: 'send_data',
     };
 
     async function callJson(url, options = {}) {
@@ -1144,7 +1159,7 @@
         else if (visual === 'progress') className += ' in-progress';
         else if (visual === 'failure') className += ' error-state';
         pill.className = className;
-        pill.textContent = state;
+        pill.textContent = state.replaceAll('_', ' ');
         elements.states.appendChild(pill);
       });
     }
@@ -1189,6 +1204,8 @@
       elements.wifiTimeout.value = snapshot.config.wifi_connect_timeout_ms;
       elements.tcpTimeout.value = snapshot.config.tcp_connect_timeout_ms;
       elements.keepaliveMs.value = snapshot.config.keepalive_period_ms;
+      elements.keepaliveButton.disabled = !['keepalive', 'send_data'].includes(snapshot.current_state);
+      elements.sendDataButton.disabled = snapshot.important_data['Send Data Enabled'] !== 'Yes';
 
       updateSummary(snapshot);
     }
@@ -1255,9 +1272,8 @@
     }, elements.applyConfigButton));
     elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
     elements.initializeButton.addEventListener('click', () => post('/api/command/initialize', null, elements.initializeButton));
-    elements.connectButton.addEventListener('click', () => post('/api/command/connect', null, elements.connectButton));
-    elements.disconnectButton.addEventListener('click', () => post('/api/command/disconnect', null, elements.disconnectButton));
     elements.keepaliveButton.addEventListener('click', () => post('/api/command/keepalive', null, elements.keepaliveButton));
+    elements.sendDataButton.addEventListener('click', () => post('/api/command/send-data', null, elements.sendDataButton));
     elements.loggerToggleButton.addEventListener('click', () => {
       loggerPaused = !loggerPaused;
       syncLoggerToggle();

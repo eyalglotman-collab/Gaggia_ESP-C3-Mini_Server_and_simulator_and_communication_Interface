@@ -8,11 +8,9 @@ flowchart TD
     WIFIOFF["Configured AP offline / not visible"] --> ERR
     TCP["TCP session loss"] --> ERR
     TCPNF["TCP server not found / not listening"] --> ERR
+    KAT["Keepalive response timeout"] --> ERR
     GEN["Generic unknown transport failure"] --> ERR
     MAL["Malformed packet / bad version"] --> ERR
-    DISC["Intentional disconnect"] --> RESET["reset state"]
 
     ERR --> HARD["reset"]
-    ERR --> SOFT["initialize"]
-    HARD --> CONN["connect after normal sequence"]
-    SOFT --> CONN
+    HARD --> CONN["initialize -> connect after normal sequence"]

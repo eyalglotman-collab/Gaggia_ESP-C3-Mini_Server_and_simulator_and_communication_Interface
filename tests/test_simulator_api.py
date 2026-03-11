@@ -1,8 +1,27 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from ServerInterface.frame_codec import Frame
+from ServerInterface.frame_codec import FrameDecodeError
+from ServerInterface.frame_codec import MessageType
+from ServerInterface.frame_codec import decode_frames
+from ServerInterface.frame_codec import encode_frame
 from server.app import app
-from server.sim.link_state_machine import link_runtime
+from server.sim.link_state_machine import LinkState, link_runtime
 from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
+
+
+def _reset_runtime_for_test() -> None:
+    with link_runtime._lock:  # noqa: SLF001 - controlled test fixture reset
+        link_runtime._current_state = LinkState.RESET  # noqa: SLF001
+        link_runtime._host_live_integer = 0  # noqa: SLF001
+        link_runtime._device_live_integer = 0  # noqa: SLF001
+        link_runtime._wifi_ready = False  # noqa: SLF001
+        link_runtime._wifi_connected = False  # noqa: SLF001
+        link_runtime._tcp_connected = False  # noqa: SLF001
+        link_runtime._bridge_ready = False  # noqa: SLF001
+        link_runtime._last_error = ''  # noqa: SLF001
+        link_runtime._clear_runtime_flow_locked()  # noqa: SLF001
 
 
 def test_health_endpoint() -> None:
@@ -141,6 +160,7 @@ def test_all_api_routes_return_snapshots(monkeypatch) -> None:
     monkeypatch.setattr(serial_link_manager, 'open_port', lambda: serial_link_manager.get_snapshot())
     monkeypatch.setattr(serial_link_manager, 'close_port', lambda: serial_link_manager.get_snapshot())
     monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
 
     endpoints = (
         ('get', '/api/link', None),
@@ -158,9 +178,8 @@ def test_all_api_routes_return_snapshots(monkeypatch) -> None:
         ('post', '/api/transport/close', None),
         ('post', '/api/command/reset', None),
         ('post', '/api/command/initialize', None),
-        ('post', '/api/command/connect', None),
-        ('post', '/api/command/disconnect', None),
         ('post', '/api/command/keepalive', None),
+        ('post', '/api/command/send-data', None),
     )
 
     for method, url, payload in endpoints:
@@ -226,3 +245,89 @@ def test_logs_are_newest_first_and_capped_to_2000() -> None:
     assert len(payload['logs']) == 2000
     assert payload['logs'][0].endswith('runtime 2104')
     assert payload['logs'][-1].endswith('runtime 105')
+
+
+def test_initialize_automatically_enters_connect_state(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(
+        serial_link_manager,
+        'get_snapshot',
+        lambda: SerialLinkSnapshot(
+            port_name='COM4',
+            baud_rate=115200,
+            port_open=True,
+            protocol='ESP32-C3 Framed Serial Link',
+            last_event_at='2026-03-11 00:00:00Z',
+            last_event='Opened serial port COM4 @ 115200.',
+            last_error='',
+            last_tx_at='Never',
+            last_rx_at='Never',
+            tx_frames=0,
+            rx_frames=0,
+            tx_bytes=0,
+            rx_bytes=0,
+        ),
+    )
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    response = client.post('/api/command/initialize')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['current_state'] == 'connect'
+    assert payload['important_data']['Send Data Enabled'] == 'No'
+
+
+def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
+    monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    response = client.post('/api/command/send-data')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['current_state'] == 'error'
+    assert payload['last_error'] == 'send data requires keepalive-ready connection'
+
+
+def test_server_interface_frame_codec_round_trip() -> None:
+    frame = Frame(
+        message_type=MessageType.KEEPALIVE,
+        host_live_integer=7,
+        device_live_integer=11,
+        sequence=19,
+        payload=b"alive",
+    )
+
+    encoded = encode_frame(frame)
+    buffer = bytearray(encoded)
+    decoded = decode_frames(buffer)
+
+    assert len(decoded) == 1
+    assert decoded[0] == frame
+    assert buffer == bytearray()
+
+
+def test_server_interface_frame_codec_rejects_bad_crc() -> None:
+    frame = Frame(
+        message_type=MessageType.CONNECT,
+        host_live_integer=1,
+        device_live_integer=2,
+        sequence=3,
+        payload=b"endpoint",
+    )
+    corrupted = bytearray(encode_frame(frame))
+    corrupted[-1] ^= 0xFF
+
+    with pytest.raises(FrameDecodeError):
+        decode_frames(corrupted)

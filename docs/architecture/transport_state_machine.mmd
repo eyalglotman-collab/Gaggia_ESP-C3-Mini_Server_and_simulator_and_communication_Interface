@@ -1,14 +1,15 @@
 stateDiagram-v2
     [*] --> reset
     reset --> initialize: reset complete / self-test passed
-    initialize --> connect: COM open / Wi-Fi config valid / transport prepared
+    initialize --> connect: send mirrored Wi-Fi/TCP constants and auto-start connect
     initialize --> error: COM unavailable / invalid Wi-Fi-TCP config / bridge bring-up failure
-    connect --> disconnect: intentional disconnect command
-    connect --> error: CRC fault, timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
-    disconnect --> reset: controlled shutdown complete
-    disconnect --> error: shutdown failure
+    connect --> keepalive: connect_ack / keepalive / data response received
+    connect --> error: connect timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
+    keepalive --> send_data: data transmit enabled after connect success
+    keepalive --> error: keepalive timeout / watchdog failure
+    send_data --> keepalive: keepalive command resumes supervision
+    send_data --> error: keepalive timeout / watchdog failure
     error --> reset: explicit hard recovery
-    error --> initialize: explicit soft recovery
 
     state reset {
         [*] --> self_test
@@ -19,5 +20,5 @@ stateDiagram-v2
     state connect {
         [*] --> wifi_ready
         wifi_ready --> tcp_session_wait
-        tcp_session_wait --> keepalive_supervision
+        tcp_session_wait --> wait_for_connect_response
     }

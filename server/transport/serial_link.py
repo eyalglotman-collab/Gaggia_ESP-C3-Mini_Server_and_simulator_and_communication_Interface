@@ -158,6 +158,18 @@ class SerialLinkManager:
             self._rx_frames.clear()
             return frames
 
+    def clear_buffers(self) -> None:
+        """@brief Clear buffered RX data and queued frames.
+
+        @details The reset path uses this helper to stop stale transport
+        traffic from leaking into the next low-level controller session.
+        """
+
+        with self._lock:
+            self._rx_buffer.clear()
+            self._rx_frames.clear()
+            self._set_event("Cleared serial RX buffers.")
+
     def get_logs(self) -> list[str]:
         with self._lock:
             return list(self._logs)

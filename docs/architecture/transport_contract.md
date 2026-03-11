@@ -19,7 +19,16 @@ This file is the canonical machine-readable design baseline for low-level transp
 | `DeviceLiveInteger` | ESP32-C3 transport controller | Returned to let the host detect bridge-side stalls independently. |
 | CRC validation | Low-level transport layer | FastAPI and high-level simulator logic should not re-implement integrity checks. |
 | Watchdog enforcement | Low-level transport layer on both sides | Missing forward progress forces transition to `error`. |
-| Recovery decision | Supervisory host logic | Only explicit `reset` or `initialize` recovers from `error`. |
+| Recovery decision | Supervisory host logic | Only explicit `reset` recovers from `error`. |
+
+## Shared Interface Boundary
+
+| Item | Required Location | Notes |
+| --- | --- | --- |
+| Portable frame definitions | `ServerInterface/` | Packet enums, binary framing, and CRC rules must live in the shared interface layer before platform adapters consume them. |
+| Native MCU-facing API | `ServerInterface/native/include/server_interface/c_api.h` | The portable C-facing API is the intended integration boundary for future STM32 firmware. |
+| PC server compatibility path | `server/transport/frame_codec.py` | Existing Python code may use a compatibility shim, but the canonical protocol rules should originate in `ServerInterface/`. |
+| Platform-specific transport ownership | `server/transport/serial_link.py` or MCU HAL adapter | Serial, USB, sockets, and host runtime ownership remain outside the shared interface core. |
 
 ## Mirrored Transport Configuration
 
@@ -74,23 +83,25 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 | State | Purpose | Entry Actions | Exit Conditions |
 | --- | --- | --- | --- |
-| `reset` | Clear session state and run self-test. | Clear counters, buffers, stale link ownership, load parameters. | Self-test complete and parameters available. |
-| `initialize` | Prepare transport resources without claiming a healthy link. | Validate mirrored COM/Wi-Fi/TCP configuration, prepare parser, and hand bridge settings to the ESP32-C3 transport controller. | Configuration valid and resources ready, or initialization fault occurs. |
-| `connect` | Establish and supervise the active low-level link. | Enter Wi-Fi-ready state, attempt the active TCP session, start keep-alive cadence, enforce CRC and sequencing. | Controlled disconnect or fault. |
-| `disconnect` | Perform controlled teardown. | Stop forwarding, close transport cleanly, preserve reason. | Teardown complete or teardown fault occurs. |
-| `error` | Latch low-level fault and block normal traffic. | Preserve error reason and last counters, stop forwarding payloads. | Explicit `reset` or `initialize` command only. |
+| `reset` | Stop transmission, clear buffers, and re-initialize the ESP controller. | Clear counters, buffers, stale link ownership, and active supervision before issuing `RESET`. | Reset complete and parameters available for initialize. |
+| `initialize` | Load the ESP controller with mirrored transport constants. | Validate mirrored COM/Wi-Fi/TCP configuration, send Wi-Fi/server constants, then automatically issue `CONNECT`. | Automatic hand-off into `connect`, or immediate fault occurs. |
+| `connect` | Wait for the ESP controller to acknowledge the active connection. | Hold the mirrored Wi-Fi-ready/connect-attempt context while waiting for `connect_ack` or equivalent progress. | Connect response succeeds and promotes to `keepalive`, or timeout/fault occurs. |
+| `keepalive` | Supervise the active low-level connection. | Exchange liveness traffic, advance `HostLiveInteger`, and watch for missed responses. | Data traffic is enabled or keepalive supervision fails. |
+| `send_data` | Allow application payload traffic on the active low-level connection. | Send validated `DATA` frames while the keepalive path remains healthy. | Operator resumes keepalive focus or a supervision fault occurs. |
+| `error` | Latch low-level fault and block normal traffic. | Preserve error reason and last counters, stop forwarding payloads. | Explicit `reset` command only. |
 
 ## Transition Table
 
 | Current State | Trigger | Guard / Condition | Action | Next State | Timeout / Failure Behavior |
 | --- | --- | --- | --- | --- | --- |
-| `reset` | Self-test complete | Parameters valid | Prepare initialization inputs | `initialize` | Self-test failure moves to `error`. |
-| `initialize` | Initialize command completed | COM is available and mirrored Wi-Fi/TCP configuration is coherent | Arm bridge resources and hand off Wi-Fi/TCP settings | `connect` | Validation, COM availability, or bridge bring-up failure moves to `error`. |
-| `connect` | Disconnect command | Intentional shutdown requested | Controlled teardown | `disconnect` | Teardown failure moves to `error`. |
-| `connect` | Fault detected | CRC fault, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit recovery. |
-| `disconnect` | Teardown complete | Resources released | Return to clean baseline | `reset` | Incomplete teardown moves to `error`. |
+| `reset` | Reset command | Operator requests hard recovery or fresh start | Stop transmission, clear buffers, and issue `RESET` to the ESP controller | `reset` | Reset-send failure moves to `error`. |
+| `reset` | Initialize command | COM is available and mirrored Wi-Fi/TCP configuration is coherent | Send transport constants and automatically issue `CONNECT` | `connect` | Validation, COM availability, or bridge bring-up failure moves to `error`. |
+| `connect` | Connect response received | `connect_ack`, `KEEPALIVE`, or `DATA` progress arrives in time | Enable keepalive supervision and send-data path | `keepalive` | Connect timeout or malformed response moves to `error`. |
+| `keepalive` | Send Data command | Connect success already enabled payload traffic | Send `DATA` frame while supervision remains active | `send_data` | Payload attempt before connect success moves to `error`. |
+| `keepalive` | Fault detected | Keepalive timeout, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit reset. |
+| `send_data` | Keepalive command | Operator resumes explicit liveness supervision | Send `KEEPALIVE` and continue supervising the active session | `keepalive` | Missing keepalive response moves to `error`. |
+| `send_data` | Fault detected | Keepalive timeout, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit reset. |
 | `error` | Recovery command | Explicit hard recovery | Clear fault and restart stack | `reset` | No implicit recovery allowed. |
-| `error` | Recovery command | Explicit soft recovery | Re-prepare resources without full reset | `initialize` | No implicit recovery allowed. |
 
 ## Packet Definitions
 
@@ -99,7 +110,6 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 | `RESET` | Force hard reset and self-test. | Supervisory host | Low-level peer | `protocol_version`, `message_type`, reset profile/parameters, CRC | `RESET_ACK` | Supervisor expects bounded response time from reset path. | Failure enters `error`. |
 | `INITIALIZE` | Prepare low-level resources. | Supervisory host | Low-level peer | serial port, Wi-Fi SSID/password, server IP/port, watchdog settings, CRC | `INITIALIZE_ACK` | Initialization must complete before connect window expires. | Validation failure enters `error`. |
 | `CONNECT` | Enter active session. | Supervisory host | Low-level peer | connection role or endpoint reference, CRC | `CONNECT_ACK` | Session establishment timeout enters `error`. | Wi-Fi/TCP socket failure enters `error`. |
-| `DISCONNECT` | Controlled teardown. | Supervisory host | Low-level peer | disconnect reason, CRC | `DISCONNECT_ACK` | Teardown must complete in bounded time. | Teardown failure enters `error`. |
 | `KEEPALIVE` | Prove host forward progress. | PC simulator host | Low-level peer | incremented `HostLiveInteger`, sequence, CRC | `KEEPALIVE_ACK` with `DeviceLiveInteger` and status | Every 100 mSec. | Missing progress enters `error`. |
 | `DATA` | Carry application payload after validation. | Either side | Peer | payload, sequence, CRC | `ACK` or application response | Normal transport timeout policy applies. | Invalid frame is rejected before upper layer sees payload. |
 | `ERROR` | Report latched low-level fault. | Faulting side | Supervisory peer | error code, state, last counters, summary, CRC | Recovery command | Immediate supervisory review required. | Link remains in `error`. |
@@ -115,18 +125,18 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 | Failure Mode | Detection Point | Required Action | Allowed Recovery |
 | --- | --- | --- | --- |
-| CRC failure | Low-level frame parser | Drop frame and latch fault | `reset` or `initialize` |
-| Host watchdog failure | ESP32-C3 transport controller | Assume host stalled and latch fault | `reset` or `initialize` after host recovers |
+| CRC failure | Low-level frame parser | Drop frame and latch fault | `reset` |
+| Host watchdog failure | ESP32-C3 transport controller | Assume host stalled and latch fault | `reset` after host recovers |
 | Device watchdog failure | PC simulator host | Stop trusting link and latch fault | `reset` |
 | USB COM loss | Host or bridge | Stop transport and latch fault | `reset` after COM recovery |
 | COM port not found | Simulator host open/initialize path | Latch explicit COM availability fault before bridge initialization continues | `reset` after COM recovery |
-| Wi-Fi association failure | Bridge-side initialize/connect | Latch fault with Wi-Fi status | `initialize` or `reset` |
+| Wi-Fi association failure | Bridge-side initialize/connect | Latch fault with Wi-Fi status | `reset` |
 | Configured AP offline / not visible | Bridge-side initialize/connect or mirrored simulator validation | Latch explicit AP-not-visible fault before claiming Wi-Fi-ready state | `reset` after RF or configuration changes |
-| TCP server not found / not listening | Bridge-side connect | Latch explicit server/listener availability fault | `initialize`, corrected endpoint, or `reset` |
-| Generic unknown transport failure | Any stage without stronger evidence | Latch stage-specific fault and stop progressing state | `reset` or `initialize` |
-| TCP session loss | Bridge-side connect state | Latch fault and stop forwarding | `initialize` then `connect`, or `reset` |
+| TCP server not found / not listening | Bridge-side connect | Latch explicit server/listener availability fault | corrected endpoint plus `reset` |
+| Keepalive response timeout | Keepalive supervision | Latch explicit keepalive fault and stop progression | `reset` |
+| Generic unknown transport failure | Any stage without stronger evidence | Latch stage-specific fault and stop progressing state | `reset` |
+| TCP session loss | Bridge-side keepalive or send-data state | Latch fault and stop forwarding | `reset` |
 | Malformed packet / unsupported version | Parser | Reject packet and latch fault | `reset` after protocol correction |
-| Intentional disconnect | Supervisor | Controlled shutdown | `reset` then normal reconnect sequence |
 
 ## Simulator UI State and Command Feedback
 
@@ -136,9 +146,9 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 | --- | --- | --- | --- | --- | --- |
 | Command button | Blue | Gray and visually pressed | Return to default blue unpressed state | Return to default blue unpressed state | The temporary in-flight color indicates that the requested command or state transition is still running. |
 
-### Machine State Color Behavior
+### Server State Color Behavior
 
-| Machine State Visual | Meaning | Notes |
+| Server State Visual | Meaning | Notes |
 | --- | --- | --- |
 | Dark blue | Inactive / default after reset | The state is not currently executing and has no completed-success latch. |
 | Blinking green | In progress | The state is currently executing and has not yet finished. |
@@ -147,9 +157,9 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 ### UI Grouping Rule
 
-- Machine-state indications must appear in a dedicated titled group box named `Machine State`.
-- Command controls and machine-state indications must remain visually distinct so actions are not confused with state reporting.
-- The logger panel should remain separate from the machine-state group and continue to display the latest rolling transport history.
+- Server-state indications must appear in a dedicated titled group box named `Server States`.
+- Command controls and server-state indications must remain visually distinct so actions are not confused with state reporting.
+- The logger panel should remain separate from the server-state group and continue to display the latest rolling transport history.
 
 ## Simulator Runtime Error Mapping
 
