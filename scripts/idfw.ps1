@@ -1,3 +1,17 @@
+<#
+.SYNOPSIS
+Runs ESP-IDF commands for the simulator bridge firmware from the repository root.
+
+.DESCRIPTION
+Resolves the firmware project, default build directory, and effective serial port,
+then loads the local ESP-IDF environment helper before forwarding all remaining
+arguments to `idf.py`. This keeps firmware commands consistent across shells and
+reduces command-line duplication in daily workflow.
+
+.PARAMETER IdfArgs
+Remaining `idf.py` arguments to forward after the repository-specific defaults
+are applied.
+#>
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$IdfArgs

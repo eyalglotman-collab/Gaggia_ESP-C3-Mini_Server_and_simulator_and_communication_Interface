@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Plays one notification sound synchronously.
+
+.DESCRIPTION
+Attempts several Windows playback backends in order so repository sound cues
+remain usable across different host audio configurations. If file playback
+fails, the script falls back to a console beep before raising an error.
+
+.PARAMETER SoundFile
+Absolute or relative path to the sound file that should be played.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -27,6 +39,7 @@ try {
 
 if (-not $playSucceeded) {
     try {
+        # WMP is used as a fallback when `SoundPlayer` cannot decode or output the file.
         $mediaPlayer = New-Object -ComObject WMPlayer.OCX
         $mediaPlayer.settings.volume = 100
         $mediaPlayer.URL = (Resolve-Path $SoundFile).Path
@@ -49,6 +62,7 @@ if (-not $playSucceeded) {
 
 if (-not $playSucceeded) {
     try {
+        # Keep a last-resort audible cue even when file-backed playback is unavailable.
         [console]::Beep(1046, 180)
         Start-Sleep -Milliseconds 60
         [console]::Beep(1318, 240)

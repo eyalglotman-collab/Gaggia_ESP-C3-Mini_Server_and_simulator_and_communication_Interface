@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Generates the simulator requirements-and-design `.docx` artifact.
+
+.DESCRIPTION
+Builds a minimal OpenXML document package in a temporary directory, injects the
+current project version and review timestamp, and writes the final `.docx`
+directly into `docs\`. The script is the canonical machine-generated source for
+that document.
+#>
 [CmdletBinding()]
 param()
 
@@ -69,6 +79,7 @@ if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force
 }
 
+# Rebuild the package from a clean temporary tree so stale OpenXML parts cannot leak forward.
 New-Item -ItemType Directory -Force $TempDir | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $TempDir '_rels') | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $TempDir 'word') | Out-Null

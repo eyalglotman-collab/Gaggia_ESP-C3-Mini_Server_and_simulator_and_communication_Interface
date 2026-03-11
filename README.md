@@ -86,6 +86,22 @@
   - run a local build
   - fix all detected issues before asking Eyal to build
 - Every function declaration and definition must have a short header comment block with `@brief`, `@details`, parameters, and return value where applicable.
+- Every maintained script file must start with a file-level documentation block that explains:
+  - the script purpose
+  - what it changes or launches
+  - the important parameters
+  - the expected outputs or side effects
+- Comment best practices for this repository:
+  - prefer comments that explain intent, constraints, ownership, or non-obvious behavior
+  - do not add comments that merely restate the next line of code
+  - keep comments synchronized with the current implementation whenever code changes
+  - use exact code-facing names in comments and documentation
+  - for inline comments, document why the code is structured a certain way or what failure mode is being prevented
+- Inline code/documentation practices for this repository:
+  - keep inline comments short and place them only where the code is not self-evident
+  - document fallbacks, host-specific workarounds, process-lifetime assumptions, and generated-file constraints where they occur
+  - prefer one clear comment before a tricky block over many low-value end-of-line comments
+  - if a helper script wraps another tool or script, document the handoff boundary and the reason that wrapper exists
 - Every `README.md` change must be committed immediately.
 - Repositories must not share tracked files. If another repository needs the same asset, script, or document, duplicate it into that repository and maintain the copies separately.
 - When a successful local verification cycle completes, play the project celebration sound from `sounds\build-success-monkey-1p5x.wav`.

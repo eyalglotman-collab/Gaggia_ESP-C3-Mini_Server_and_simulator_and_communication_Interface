@@ -1,3 +1,20 @@
+<#
+.SYNOPSIS
+Starts the simulator wait-sound notification flow.
+
+.DESCRIPTION
+Plays the configured wait sound once immediately, then launches or reuses a
+hidden worker that repeats the sound at a fixed interval while VS Code remains
+open. The worker PID is stored in `.cache\wait_sound.pid` so it can be stopped
+as soon as user interaction resumes.
+
+.PARAMETER Worker
+Internal switch used when the script is relaunched as the detached repeat
+worker.
+
+.PARAMETER IntervalSeconds
+Delay between repeat notifications while the worker is active.
+#>
 [CmdletBinding()]
 param(
     [switch]$Worker,
@@ -83,6 +100,7 @@ function Start-WaitWorker {
     }
 
     New-Item -ItemType Directory -Force (Split-Path -Parent $PidFile) | Out-Null
+    # Relaunch the same script as a hidden worker so the chat-side caller can return immediately.
     $command = "& '$PSCommandPath' -Worker -IntervalSeconds $IntervalSeconds"
     $proc = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", $command) -PassThru
     Set-Content -Path $PidFile -Value $proc.Id -NoNewline

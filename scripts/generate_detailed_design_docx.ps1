@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Generates the simulator detailed-design `.docx` artifact.
+
+.DESCRIPTION
+Builds the detailed design OpenXML package from maintained text content and the
+rendered diagram set under `docs\diagrams`, then writes the finished `.docx`
+into `docs\`. The script is the canonical machine-generated source for the
+detailed design document.
+#>
 [CmdletBinding()]
 param()
 
@@ -9,6 +19,11 @@ $ReviewedOn = Get-Date -Format 'dd-MMM-yy HH:mm:ss'
 $DiagramDir = Join-Path $ProjectRoot "docs\diagrams"
 $MaxImageWidthEmu = 6.2 * 914400
 
+# @brief Resolve a writable output path for the generated `.docx`.
+# @details Reuses the preferred path when it is unlocked; otherwise it falls
+# back to a `.generated.docx` sibling so document generation still succeeds.
+# @param[in] PreferredPath Intended output path.
+# @return Writable output path.
 function Resolve-DocxOutputPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -31,6 +46,11 @@ function Resolve-DocxOutputPath {
     }
 }
 
+# @brief Write a UTF-8 text file without BOM.
+# @details Used for temporary OpenXML parts before they are packaged into the
+# final `.docx` container.
+# @param[in] Path Destination file path.
+# @param[in] Content File text content.
 function Write-Utf8File {
     param(
         [Parameter(Mandatory = $true)]
@@ -43,6 +63,11 @@ function Write-Utf8File {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8)
 }
 
+# @brief Create a docx package from named OpenXML parts.
+# @details Writes explicit ZIP entries with forward-slash package names so the
+# resulting file is valid for Word and other OpenXML consumers.
+# @param[in] OutputDocx Destination `.docx` path.
+# @param[in] Parts Hashtable mapping package entry names to source file paths.
 function New-DocxPackage {
     param(
         [Parameter(Mandatory = $true)]
@@ -86,6 +111,11 @@ function New-DocxPackage {
     }
 }
 
+# @brief Convert plain text into one Word paragraph fragment.
+# @details Escapes XML-sensitive characters and preserves spaces so generated
+# paragraphs remain valid in the document body.
+# @param[in] Text Paragraph text.
+# @return WordprocessingML paragraph fragment.
 function ConvertTo-ParagraphXml {
     param(
         [Parameter(Mandatory = $true)]
@@ -101,6 +131,11 @@ function ConvertTo-ParagraphXml {
     return "<w:p><w:r><w:t xml:space=`"preserve`">$escaped</w:t></w:r></w:p>"
 }
 
+# @brief Create a centered italic caption paragraph for an embedded image.
+# @details Used immediately before each diagram so the exported document keeps
+# figure descriptions aligned with the image they describe.
+# @param[in] Caption Figure caption text.
+# @return WordprocessingML paragraph fragment.
 function New-CaptionParagraphXml {
     param(
         [Parameter(Mandatory = $true)]
@@ -111,6 +146,15 @@ function New-CaptionParagraphXml {
     return "<w:p><w:pPr><w:jc w:val=`"center`"/></w:pPr><w:r><w:rPr><w:i/></w:rPr><w:t xml:space=`"preserve`">$escaped</w:t></w:r></w:p>"
 }
 
+# @brief Create the drawing paragraph for one embedded image.
+# @details Emits the minimal WordprocessingML drawing fragment needed to place
+# a pre-rendered PNG in the generated document.
+# @param[in] RelationshipId Image relationship identifier.
+# @param[in] Name Display name for the embedded image.
+# @param[in] WidthEmu Render width in EMUs.
+# @param[in] HeightEmu Render height in EMUs.
+# @param[in] DocPrId Unique drawing-property identifier.
+# @return WordprocessingML drawing fragment.
 function New-DrawingParagraphXml {
     param(
         [Parameter(Mandatory = $true)]
@@ -166,6 +210,11 @@ function New-DrawingParagraphXml {
 "@
 }
 
+# @brief Build the metadata map for all requested embedded images.
+# @details Loads each referenced PNG, computes a scaled document size, and
+# assigns the relationship identifiers later used in the OpenXML package.
+# @param[in] Markers Image marker list extracted from the body content.
+# @return Hashtable keyed by image file name.
 function Get-ImageMap {
     param(
         [Parameter(Mandatory = $true)]
@@ -212,6 +261,12 @@ function Get-ImageMap {
     return $imageMap
 }
 
+# @brief Convert the body item list into WordprocessingML fragments.
+# @details Expands plain text into paragraphs and image markers into caption
+# plus drawing fragments using the resolved image metadata.
+# @param[in] Items Ordered body content items.
+# @param[in] ImageMap Embedded-image metadata.
+# @return Concatenated WordprocessingML body fragment.
 function ConvertTo-BodyXml {
     param(
         [Parameter(Mandatory = $true)]
@@ -252,6 +307,7 @@ if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force
 }
 
+# Start from a clean temporary package tree so regenerated docs do not retain stale parts.
 New-Item -ItemType Directory -Force $TempDir | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $TempDir "_rels") | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $TempDir "word") | Out-Null

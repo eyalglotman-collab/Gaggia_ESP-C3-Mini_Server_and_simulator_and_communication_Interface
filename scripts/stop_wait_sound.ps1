@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+Stops the detached simulator wait-sound worker.
+
+.DESCRIPTION
+Reads the PID file created by `start_wait_sound.ps1`, terminates that worker if
+it is still alive, and removes the recorded handle so later wait cycles start
+from a clean state.
+#>
 [CmdletBinding()]
 param()
 

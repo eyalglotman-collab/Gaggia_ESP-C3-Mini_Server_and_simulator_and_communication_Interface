@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+Renders the simulator transport architecture diagrams used by the design docs.
+
+.DESCRIPTION
+Uses `System.Drawing` to generate the maintained PNG diagrams for the split
+architecture, state machine, failure overview, and packet flows. The generated
+images are later embedded into the detailed design `.docx`.
+#>
 [CmdletBinding()]
 param()
 
@@ -389,6 +398,11 @@ function Draw-FailureOverview {
 # @details Generates the architecture, state, failure, and per-packet flow PNGs
 # into docs/diagrams for later embedding into the docx package.
 function New-TransportDiagramSet {
+    <#
+    @brief Build all rendered transport diagrams for the detailed design docs.
+    @details Generates the architecture, state, failure, and per-packet flow PNGs
+    into docs/diagrams for later embedding into the docx package.
+    #>
     $packetSpecs = @(
         @{
             Name = "packet_reset_flow.png"
@@ -455,10 +469,11 @@ function New-TransportDiagramSet {
         }
     )
 
-    if (Test-Path $OutputDir) {
+if (Test-Path $OutputDir) {
         Remove-Item $OutputDir -Recurse -Force
     }
 
+    # Regenerate the full set from scratch so the docx embed step never mixes old and new diagrams.
     New-Item -ItemType Directory -Force $OutputDir | Out-Null
     Draw-Architecture -Path (Join-Path $OutputDir "architecture_transport_split.png")
     Draw-StateDiagram -Path (Join-Path $OutputDir "low_level_state_machine.png")

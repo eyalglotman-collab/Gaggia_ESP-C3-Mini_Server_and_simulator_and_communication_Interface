@@ -1,3 +1,18 @@
+<#
+.SYNOPSIS
+Prepares the local ESP-IDF PowerShell environment for the simulator bridge firmware.
+
+.DESCRIPTION
+Validates the ESP-IDF export script path, ensures the repository cache and build
+directories exist, sets the default serial port when needed, and imports the
+ESP-IDF environment so later `idf.py` commands use consistent local paths.
+
+.PARAMETER IdfPath
+Absolute ESP-IDF installation path that contains `export.ps1`.
+
+.PARAMETER DefaultPort
+Serial port to expose through `ESPPORT` when the caller has not already chosen one.
+#>
 param(
     [string]$IdfPath = "C:\Espressif\.espressif\v5.5.2\esp-idf",
     [string]$DefaultPort = "COM4"
@@ -28,6 +43,7 @@ if (-not $env:ESPPORT) {
     $env:ESPPORT = $DefaultPort
 }
 
+# Import the ESP-IDF shell exports only after the repo-local paths are ready.
 . $ExportScript
 
 Write-Host "ESP-IDF environment ready"

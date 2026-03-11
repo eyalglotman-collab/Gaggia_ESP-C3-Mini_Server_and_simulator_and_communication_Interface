@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+Plays the simulator build-success notification sound once.
+
+.DESCRIPTION
+Delegates to the shared sound-playback helper so success notifications reuse
+the same backend selection and fallback behavior as other repository sound
+notifications.
+#>
 [CmdletBinding()]
 param()
 
