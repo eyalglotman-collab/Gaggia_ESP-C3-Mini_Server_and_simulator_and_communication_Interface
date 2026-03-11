@@ -2,10 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.4\par
-- Summary: Expanded the simulator transport UI, documented the updated launch/workflow rules, and refined logger/state display behavior.\par
+- Version: 0.1.5\par
+- Summary: Documented the stable Python `uvicorn` backend launch contract, updated simulator design artifacts, and recorded runtime-launch best practices.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-11 11:51:01\b0\par
+- Version: 0.1.5\par
+- Summary: Formalized the simulator backend launch design and versioned the documentation update.\par
+- Notes: Added a backend launch contract to the machine-readable transport design, updated the requirements and detailed design documents to describe the preferred repo-local launcher, `.venv` resolution, stdout/stderr visibility, `/health` readiness verification, stable host supervision, and cache-busted browser launch flow, and captured the rationale that backend correctness must remain separate from transient tool or sandbox process lifetime.\par
+- Resolved Defects:\par
+  - DOC-20260311-1: Simulator backend launch guidance was incomplete and did not explicitly define the best-practice launch contract for Python plus `uvicorn` on this Windows host.\par
+\par
 \b 2026-03-10 21:10:41\b0\par
 - Version: 0.1.4\par
 - Summary: Refined simulator navigation alignment and condensed the stacked operator layout.\par
