@@ -118,6 +118,8 @@
   - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
   - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
+  - before the manual batch launcher starts any simulator script, run `scripts\verify_simulator_installation.ps1` to verify the required local runtime components and exact development versions
+  - if installation verification finds any missing component or version mismatch, show a popup with the gaps and stop instead of continuing to startup
   - `scripts\launch_simulator_ui.ps1` is the manual-launch helper that starts the backend, waits for `/health`, and then asks whether to open the UI in a fresh browser session
   - `scripts\run_simulator.bat` is the Windows batch convenience wrapper for shells or tools that prefer `.bat` entry points; it forwards arguments into `scripts\launch_simulator_ui.ps1`
   - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
@@ -185,6 +187,7 @@
 - `docs/VERSIONING.md`: versioning policy
 - `scripts/generate_requirements_docx.ps1`: requirements document generator
 - `scripts/generate_detailed_design_docx.ps1`: detailed design generator
+- `scripts/verify_simulator_installation.ps1`: preflight runtime-version verifier for the manual launcher
 - `scripts/launch_simulator_ui.ps1`: manual-launch helper that prompts to open a fresh browser session after backend startup
 - `scripts/run_simulator.bat`: Windows batch wrapper for the repo-local simulator PowerShell launcher
 - When creating or updating `.docx` files programmatically, use an extract/edit/repack flow for the OpenXML container (`.docx` is a ZIP package) instead of in-place ZIP entry replacement on this host.
