@@ -120,15 +120,14 @@
   - separate application correctness from editor, sandbox, or task-runner lifetime
 - For this project, the startup order is mandatory:
   - from now on, launch the simulator the same way a standard user would: start from `scripts\run_simulator.bat` unless a lower-level script is being edited or debugged directly
-  - launch the repository `.venv`-backed Python application first through the deterministic repo-local launcher `scripts\run_simulator.ps1`
-  - before the manual batch launcher starts any simulator script, run `scripts\verify_simulator_installation.ps1` to verify the required local runtime components and exact development versions
+  - `scripts\run_simulator.bat` shall open one visible PowerShell host for the manual-launch flow and must not cascade into multiple visible PowerShell windows
+  - `scripts\launch_simulator_ui.ps1` shall run installation verification inside that same launcher host, then start the backend and ask whether to open the UI in a fresh browser session
   - if installation verification finds any missing component or version mismatch, show a popup with the gaps and stop instead of continuing to startup
-  - `scripts\launch_simulator_ui.ps1` is the manual-launch helper that starts the backend, waits for `/health`, and then asks whether to open the UI in a fresh browser session
-  - `scripts\run_simulator.bat` is the Windows batch convenience wrapper for shells or tools that prefer `.bat` entry points; it forwards arguments into `scripts\launch_simulator_ui.ps1`
+  - launch the repository `.venv`-backed Python application through the deterministic repo-local launcher `scripts\run_simulator.ps1`
   - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
   - if the target port is already listening, inspect the owning process and only replace it when it can be positively identified as this simulator backend
   - when replacing an old simulator listener, attempt graceful termination first and force-stop only as fallback
-  - if the backend must outlive the initiating shell, run it under a stable supervising host rather than a transient detached task
+  - the manual launcher shall start the backend as a Python process directly rather than opening another PowerShell host for backend execution
   - preserve backend stdout and stderr visibility or redirect them into repo-local logs for diagnosis
   - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
   - before opening the browser, clear or bypass cached page state so the browser loads the latest simulator UI instead of stale frontend assets
@@ -192,8 +191,8 @@
 - `scripts/generate_requirements_docx.ps1`: requirements document generator
 - `scripts/generate_detailed_design_docx.ps1`: detailed design generator
 - `scripts/verify_simulator_installation.ps1`: preflight runtime-version verifier for the manual launcher
-- `scripts/launch_simulator_ui.ps1`: manual-launch helper that prompts to open a fresh browser session after backend startup
-- `scripts/run_simulator.bat`: Windows batch wrapper for the repo-local simulator PowerShell launcher
+- `scripts/launch_simulator_ui.ps1`: single-host manual-launch helper that verifies installation, starts the backend, and prompts to open a fresh browser session
+- `scripts/run_simulator.bat`: Windows batch wrapper that opens the one visible PowerShell host for the standard-user simulator launch path
 - When creating or updating `.docx` files programmatically, use an extract/edit/repack flow for the OpenXML container (`.docx` is a ZIP package) instead of in-place ZIP entry replacement on this host.
 - Programmatic `.docx` generation must write valid OpenXML package entry names with forward slashes such as `_rels/.rels` and `word/document.xml`, and must emit valid XML text without doubled quote escaping inside the stored XML files.
 - `scripts/play_wait_sound.ps1`: one-shot WAV playback helper

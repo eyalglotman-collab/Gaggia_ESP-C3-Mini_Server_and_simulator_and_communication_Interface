@@ -29,7 +29,6 @@ param(
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LocalPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
-$PythonExe = if (Test-Path $LocalPython) { $LocalPython } else { 'python' }
 
 # @brief Inspect a process and decide whether it is safe to replace.
 # @details Uses process name and command-line evidence to distinguish this
@@ -150,6 +149,85 @@ function Stop-PortListeners {
     Start-Sleep -Milliseconds 500
 }
 
+# @brief Resolve the preferred Python interpreter for simulator backend startup.
+# @details Prefers the repository-local virtual-environment interpreter and
+# falls back to `python` only when the local interpreter is unavailable.
+# @return Python executable path or command name.
+function Get-SimulatorPythonExe {
+    if (Test-Path $LocalPython) {
+        return $LocalPython
+    }
+
+    return 'python'
+}
+
+# @brief Start the backend simulator synchronously in the current PowerShell host.
+# @details Applies safe listener replacement first and then executes `uvicorn`
+# from the repository root so relative paths remain stable.
+# @param[in] HostName Bind host for uvicorn.
+# @param[in] Port Bind port for uvicorn.
+# @param[in] Reload Enable uvicorn auto-reload for development.
+function Start-SimulatorBackend {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HostName,
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [Parameter(Mandatory = $true)]
+        [bool]$Reload
+    )
+
+    $pythonExe = Get-SimulatorPythonExe
+
+    Push-Location $ProjectRoot
+    try {
+        # Keep one authoritative backend instance per port without killing unrelated services.
+        Stop-PortListeners -Port $Port
+        $args = @('-m', 'uvicorn', 'server.app:app', '--host', $HostName, '--port', "$Port")
+        if ($Reload) {
+            $args += '--reload'
+        }
+
+        # Execute from the repo root so relative paths inside the app resolve consistently.
+        & $pythonExe @args
+    } finally {
+        Pop-Location
+    }
+}
+
+# @brief Start the backend simulator as a detached process without opening another PowerShell host.
+# @details Launches the repository-local Python interpreter directly so the
+# manual launcher path keeps a single visible PowerShell window.
+# @param[in] HostName Bind host for uvicorn.
+# @param[in] Port Bind port for uvicorn.
+# @param[in] Reload Enable uvicorn auto-reload for development.
+# @return Process object for the detached backend instance.
+function Start-SimulatorBackendProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HostName,
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [Parameter(Mandatory = $true)]
+        [bool]$Reload
+    )
+
+    $pythonExe = Get-SimulatorPythonExe
+
+    Push-Location $ProjectRoot
+    try {
+        Stop-PortListeners -Port $Port
+        $args = @('-m', 'uvicorn', 'server.app:app', '--host', $HostName, '--port', "$Port")
+        if ($Reload) {
+            $args += '--reload'
+        }
+
+        return Start-Process -FilePath $pythonExe -ArgumentList $args -WorkingDirectory $ProjectRoot -PassThru
+    } finally {
+        Pop-Location
+    }
+}
+
 # @brief Start the backend simulator with uvicorn.
 # @details Runs the FastAPI application from the simulator repository root and
 # prefers the local virtual-environment interpreter when available after safely
@@ -157,16 +235,6 @@ function Stop-PortListeners {
 # @param[in] HostName Bind host for uvicorn.
 # @param[in] Port Bind port for uvicorn.
 # @param[in] Reload Enable uvicorn auto-reload for development.
-Push-Location $ProjectRoot
-try {
-    # Keep one authoritative backend instance per port without killing unrelated services.
-    Stop-PortListeners -Port $Port
-    $args = @('-m', 'uvicorn', 'server.app:app', '--host', $HostName, '--port', "$Port")
-    if ($Reload) {
-        $args += '--reload'
-    }
-    # Execute from the repo root so relative paths inside the app resolve consistently.
-    & $PythonExe @args
-} finally {
-    Pop-Location
+if ($MyInvocation.InvocationName -ne '.') {
+    Start-SimulatorBackend -HostName $HostName -Port $Port -Reload $Reload.IsPresent
 }

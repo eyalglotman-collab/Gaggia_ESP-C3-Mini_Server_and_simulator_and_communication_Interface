@@ -30,38 +30,9 @@ param(
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BackendScript = Join-Path $PSScriptRoot 'run_simulator.ps1'
+$VerifierScript = Join-Path $PSScriptRoot 'verify_simulator_installation.ps1'
 $HealthUrl = "http://$HostName`:$Port/health"
 $UiUrlBase = "http://$HostName`:$Port/"
-
-# @brief Start the backend in a dedicated PowerShell host window.
-# @details Keeps the long-lived `uvicorn` process outside the short launcher
-# session so the backend remains available after the prompt flow returns.
-# @param[in] HostName Bind address for the backend.
-# @param[in] Port Bind port for the backend.
-# @param[in] Reload Enables backend auto-reload.
-function Start-BackendHost {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$HostName,
-        [Parameter(Mandatory = $true)]
-        [int]$Port,
-        [Parameter(Mandatory = $true)]
-        [bool]$Reload
-    )
-
-    $argumentList = @(
-        '-NoExit',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $BackendScript,
-        '-HostName', $HostName,
-        '-Port', "$Port"
-    )
-    if ($Reload) {
-        $argumentList += '-Reload'
-    }
-
-    Start-Process -FilePath powershell.exe -ArgumentList $argumentList -WorkingDirectory $ProjectRoot | Out-Null
-}
 
 # @brief Wait for the backend health endpoint to report ready.
 # @details Polls `/health` until it returns HTTP 200 or the timeout window
@@ -121,7 +92,21 @@ function Show-BrowserPrompt {
 if (-not (Test-Path $BackendScript)) {
     throw "Backend launcher not found: $BackendScript"
 }
+if (-not (Test-Path $VerifierScript)) {
+    throw "Installation verifier not found: $VerifierScript"
+}
 
-Start-BackendHost -HostName $HostName -Port $Port -Reload $Reload.IsPresent
+. $VerifierScript
+. $BackendScript
+
+$gaps = Get-SimulatorInstallationGaps
+if ($gaps.Count -gt 0) {
+    Show-GapMessage -Gaps $gaps
+    exit 1
+}
+
+Write-Host "Starting simulator backend on $HostName`:$Port ..."
+$backendProcess = Start-SimulatorBackendProcess -HostName $HostName -Port $Port -Reload $Reload.IsPresent
 Wait-ForBackendHealth -HealthUrl $HealthUrl -StartupTimeoutSec $StartupTimeoutSec
+Write-Host "Simulator backend ready. PID=$($backendProcess.Id)"
 Show-BrowserPrompt -UiUrlBase $UiUrlBase

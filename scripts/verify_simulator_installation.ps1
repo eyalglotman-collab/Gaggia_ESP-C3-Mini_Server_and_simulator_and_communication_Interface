@@ -50,11 +50,18 @@ function Show-GapMessage {
     )
 }
 
-$gaps = New-Object System.Collections.Generic.List[string]
+# @brief Return all installation gaps relative to the simulator baseline.
+# @details Checks the repository-local interpreter and required package
+# versions and returns a list of mismatches without showing UI by itself.
+# @return List of human-readable gap descriptions.
+function Get-SimulatorInstallationGaps {
+    $gaps = New-Object System.Collections.Generic.List[string]
 
-if (-not (Test-Path $PythonExe)) {
-    $gaps.Add("Missing repository-local Python interpreter: $PythonExe")
-} else {
+    if (-not (Test-Path $PythonExe)) {
+        $gaps.Add("Missing repository-local Python interpreter: $PythonExe")
+        return $gaps.ToArray()
+    }
+
     $pythonVersionOutput = & $PythonExe --version 2>&1
     if ($LASTEXITCODE -ne 0) {
         $gaps.Add("Failed to query Python version from $PythonExe")
@@ -102,11 +109,16 @@ for name in packages:
             $gaps.Add("Package version mismatch for $packageName. Expected $expectedVersion, found $actualVersion.")
         }
     }
+
+    return $gaps.ToArray()
 }
 
-if ($gaps.Count -gt 0) {
-    Show-GapMessage -Gaps $gaps.ToArray()
-    exit 1
-}
+if ($MyInvocation.InvocationName -ne '.') {
+    $gaps = Get-SimulatorInstallationGaps
+    if ($gaps.Count -gt 0) {
+        Show-GapMessage -Gaps $gaps
+        exit 1
+    }
 
-exit 0
+    exit 0
+}
