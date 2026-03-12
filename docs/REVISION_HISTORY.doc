@@ -2,10 +2,18 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.13\par
-- Summary: Added received-client text visibility, corrected server/client counter placement in the UI, and kept firmware version unchanged because no firmware files changed.\par
+- Version: 0.1.15\par
+- Summary: Extended the ESP32-C3 bridge into a SoftAP plus TCP server transport endpoint and aligned the firmware/documentation versions.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-12 14:34:13\b0\par
+- Version: 0.1.15\par
+- Firmware Version: 0.1.15\par
+- Summary: Promoted the ESP32-C3 bridge from USB-only framing into the simulator SoftAP/TCP transport endpoint.\par
+- Notes: `firmware/esp32c3_bridge/main/bridge_main.c` now brings up a visible `EyalSimulatorAP` SoftAP, owns a single-client TCP listener on `192.168.4.1:3333`, accepts framed transport traffic over both USB Serial/JTAG and TCP, and sends `client_connected` on TCP connect so the ESP32-S3 client can advance into keepalive. The bridge payload ceiling was increased to 256 bytes, stale TCP sessions are actively replaced or closed on reset, disconnect, and parse failure, and the transport design sources plus detailed design document were updated so the documented server-side flow matches the new firmware behavior.\par
+- Resolved Defects:\par
+  - BRIDGE-20260312-1: The ESP32-C3 bridge exposed only USB framing, so the ESP32-S3 client could not reach the simulator transport path over Wi-Fi/TCP.\par
+\par
 \b 2026-03-11 17:20:00\b0\par
 - Version: 0.1.13\par
 - Firmware Version: 0.1.12\par

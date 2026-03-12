@@ -441,7 +441,7 @@ $bodyItems = @(
     "The simulator host shall mirror the same low-level transport defaults used by the client-side communication layer so both repositories describe one coherent interface contract."
     "Default Fields:"
     "  serial_port = COM4"
-    "  wifi_ssid = EyalSimulatorAP"
+    "  wifi_ssid = EyalSimulatorAP (advertised as a visible SoftAP by the ESP32-C3 bridge)"
     "  wifi_password = espresso1234"
     "  server_ip = 192.168.4.1"
     "  server_port = 3333"

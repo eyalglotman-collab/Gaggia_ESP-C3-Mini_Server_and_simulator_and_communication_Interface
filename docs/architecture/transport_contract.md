@@ -35,7 +35,7 @@ This file is the canonical machine-readable design baseline for low-level transp
 | Field | Default | Purpose |
 | --- | --- | --- |
 | `serial_port` | `COM4` | USB serial endpoint from the PC host into the ESP32-C3 bridge. |
-| `wifi_ssid` | `EyalSimulatorAP` | Bridge-side Wi-Fi network identifier mirrored from the client contract. |
+| `wifi_ssid` | `EyalSimulatorAP` | Bridge-side Wi-Fi network identifier mirrored from the client contract and advertised by the ESP32-C3 as a visible SoftAP (`ssid_hidden = 0`). |
 | `wifi_password` | `espresso1234` | Bridge-side Wi-Fi credential mirrored from the client contract. |
 | `server_ip` | `192.168.4.1` | Default bridge-side/server endpoint address used during connect. |
 | `server_port` | `3333` | TCP endpoint used for the low-level transport session. |

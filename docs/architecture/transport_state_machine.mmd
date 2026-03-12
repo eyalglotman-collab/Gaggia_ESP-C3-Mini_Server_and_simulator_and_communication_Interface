@@ -1,7 +1,7 @@
 stateDiagram-v2
     [*] --> reset
     reset --> initialize: reset complete / self-test passed
-    initialize --> connect: send mirrored Wi-Fi/TCP constants and auto-start connect
+    initialize --> connect: send mirrored Wi-Fi/TCP constants, keep SoftAP visible, and auto-start connect
     initialize --> error: COM unavailable / invalid Wi-Fi-TCP config / bridge bring-up failure
     connect --> keepalive: connect_ack / keepalive / data response received
     connect --> error: connect timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
@@ -14,7 +14,7 @@ stateDiagram-v2
     state reset {
         [*] --> self_test
         self_test --> load_params
-        load_params --> mirror_defaults: COM4 + EyalSimulatorAP + 192.168.4.1:3333
+        load_params --> mirror_defaults: COM4 + visible EyalSimulatorAP + 192.168.4.1:3333
     }
 
     state connect {
