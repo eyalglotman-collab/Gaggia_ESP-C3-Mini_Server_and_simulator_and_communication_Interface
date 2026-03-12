@@ -17,6 +17,10 @@
 
 - Product requirements and application design shall be maintained in `docs/EyalEspressoServerSimulatorRequirements and Design.docx`.
 - `README.md` is the workflow/session handoff file; the requirements/design document is the primary place for application requirements, UX intent, architecture decisions, and planned features.
+- Build and flash for firmware targets must be run sequentially, never in parallel.
+- The required order is: build first, then flash the produced binary.
+- After every `flash` or `monitor` call on a COM port, close all processes attached to that COM port before continuing.
+- Do not leave `idf.py`, `idf_monitor.py`, PowerShell wrappers, Python wrappers, serial helpers, or any other PID attached to the target COM port after the command completes.
 - At the start of work in this repository, Codex must read the documentation set under `docs/` and learn the purpose and structure of each maintained document before making design or implementation decisions.
 - The required documentation review includes at minimum:
   - `docs/EyalEspressoServerSimulatorRequirements and Design.docx`
@@ -156,6 +160,7 @@
     - light green = finished with success
 - This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.
 - For USB serial integration, one background serial manager shall own the COM port and the FastAPI routes shall communicate with that manager instead of opening the port directly from request handlers.
+- After any firmware `flash`, ESP-IDF `monitor`, or raw serial-capture workflow on a COM port, Codex must close all attached monitor/capture/helper processes and verify that no stale PID remains attached to that COM port before reopening it through the simulator runtime.
 
 ### Codex and VS Code `PROBLEMS` (Session Rule)
 
