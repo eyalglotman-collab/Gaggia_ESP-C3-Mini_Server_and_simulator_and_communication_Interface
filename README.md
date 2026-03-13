@@ -15,6 +15,9 @@
 
 ## Project Workflow Rules
 
+- Continue from [TODO_CONTINUE.md](TODO_CONTINUE.md) when resuming simulator transport-debug work in this repo.
+- Treat that file as the persistent handoff/TODO note for the next session before making new transport changes.
+
 - Product requirements and application design shall be maintained in `docs/EyalEspressoServerSimulatorRequirements and Design.docx`.
 - `README.md` is the workflow/session handoff file; the requirements/design document is the primary place for application requirements, UX intent, architecture decisions, and planned features.
 - Build and flash for firmware targets must be run sequentially, never in parallel.
