@@ -21,6 +21,7 @@
 - The required order is: build first, then flash the produced binary.
 - After every `flash` or `monitor` call on a COM port, close all processes attached to that COM port before continuing.
 - Do not leave `idf.py`, `idf_monitor.py`, PowerShell wrappers, Python wrappers, serial helpers, or any other PID attached to the target COM port after the command completes.
+- Codex has explicit permission to run commands that release a COM port and terminate the exact processes holding that COM port when cleanup is required.
 - At the start of work in this repository, Codex must read the documentation set under `docs/` and learn the purpose and structure of each maintained document before making design or implementation decisions.
 - The required documentation review includes at minimum:
   - `docs/EyalEspressoServerSimulatorRequirements and Design.docx`
