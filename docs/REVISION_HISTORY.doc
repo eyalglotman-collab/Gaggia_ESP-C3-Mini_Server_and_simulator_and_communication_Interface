@@ -2,10 +2,16 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.15\par
-- Summary: Extended the ESP32-C3 bridge into a SoftAP plus TCP server transport endpoint and aligned the firmware/documentation versions.\par
+- Version: 0.1.16\par
+- Summary: Moved simulator transport ownership toward the ESP32-C3 bridge, simplified the operator UI, and aligned the host runtime to monitor bridge-owned connect/keepalive behavior.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-13 19:50:00\b0\par
+- Version: 0.1.16\par
+- Firmware Version: 0.1.16\par
+- Summary: Shifted simulator-side transport behavior out of duplicate Python control paths and into the ESP32-C3 bridge while updating the UI and design docs.\par
+- Notes: `firmware/esp32c3_bridge/main/bridge_main.c` now gates bridge keepalive traffic on the post-connect bridge state instead of raw socket accept, resets counters on connect entry, and continues owning the authoritative two-counter keepalive/watchdog flow. `server/sim/link_state_machine.py` now treats Python `connect` as a monitor-only state, removes duplicate USB `CONNECT` transmission during normal flow and retry flow, and keeps the host focused on reset/initialize, COM ownership, logs, and mirrored bridge state. The simulator UI/backend sources in `server/ui/index.html`, `server/api/routes.py`, and `server/transport/serial_link.py` carry the simplified control surface, COM-release handling, and transport cleanup changes, while the architecture diagrams and detailed design document were regenerated to match the current ownership split.\par
+\par
 \b 2026-03-12 14:34:13\b0\par
 - Version: 0.1.15\par
 - Firmware Version: 0.1.15\par

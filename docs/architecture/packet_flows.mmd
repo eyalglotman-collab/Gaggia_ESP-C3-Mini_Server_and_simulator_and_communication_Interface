@@ -1,41 +1,39 @@
 flowchart TD
     subgraph RESET["RESET"]
-        R1["Host sends RESET(profile or parameters)"] --> R2["Bridge clears counters and buffers"]
-        R2 --> R3["Bridge runs self-test"]
-        R3 --> R4["Bridge returns RESET_ACK"]
+        R1["Host sends RESET"] --> R2["Bridge clears counters and buffers"]
+        R2 --> R3["Bridge returns RESET_ACK"]
+        R3 --> R4["Server arms automatic initialize progression"]
     end
 
     subgraph INITIALIZE["INITIALIZE"]
-        I1["Host sends INITIALIZE(serial port, ssid, password, server IP/port, watchdog)"] --> I2["Simulator validates mirrored Wi-Fi/TCP configuration"]
+        I1["Host validates mirrored COM/Wi-Fi/TCP configuration"] --> I2["Host sends INITIALIZE(serial port, ssid, password, server IP/port, watchdog)"]
         I2 --> I3["Bridge prepares Wi-Fi/TCP resources"]
         I3 --> I4["Bridge returns INITIALIZE_ACK"]
     end
 
     subgraph CONNECT["CONNECT"]
-        C1["Host sends CONNECT(server endpoint reference)"] --> C2["Bridge enters Wi-Fi-ready state and attempts TCP session"]
-        C2 --> C3["Bridge returns CONNECT_ACK"]
-        C3 --> C4["Both sides enter 100 mSec keep-alive supervision"]
-    end
-
-    subgraph DISCONNECT["DISCONNECT"]
-        D1["Host sends DISCONNECT(reason)"] --> D2["Bridge tears down session cleanly"]
-        D2 --> D3["Bridge returns DISCONNECT_ACK"]
-        D3 --> D4["Supervisor returns to reset"]
+        C1["Host sends CONNECT(server endpoint reference)"] --> C2["Bridge enters Wi-Fi-ready state and zeroes ServerLiveInteger and ClientLiveInteger"]
+        C2 --> C3["Bridge accepts or restores the TCP session and returns CONNECT_ACK"]
+        C3 --> C4["Bridge mirrors client_connected or first KEEPALIVE back to the host"]
+        C4 --> C5["Host promotes to keepalive"]
     end
 
     subgraph KEEPALIVE["KEEPALIVE"]
-        K1["Host sends KEEPALIVE with incremented HostLiveInteger"] --> K2["Bridge validates host forward progress"]
-        K2 --> K3["Bridge replies with KEEPALIVE_ACK and DeviceLiveInteger"]
-        K3 --> K4["Host validates timing and bridge progress"]
+        K1["ESP32-C3 bridge/server sends KEEPALIVE with current ServerLiveInteger"] --> K2["ESP32-S3 client validates ServerLiveInteger and increments ClientLiveInteger"]
+        K2 --> K3["ESP32-S3 client returns KEEPALIVE with the new ClientLiveInteger"]
+        K3 --> K4["ESP32-C3 bridge validates ClientLiveInteger, increments ServerLiveInteger, and sends the next KEEPALIVE"]
+        K4 --> K5["Simulator host mirrors ServerLiveInteger and ClientLiveInteger over USB and clears ConnectionFault"]
     end
 
     subgraph DATA["DATA"]
-        P1["Upper layer sends DATA payload"] --> P2["Low-level layer validates framing and CRC"]
-        P2 --> P3["Validated payload is forwarded"]
-        P3 --> P4["Peer returns DATA response or ACK"]
+        P1["Either side sends DATA payload during keepalive"] --> P2["Low-level layer validates framing and CRC"]
+        P2 --> P3["Validated payload is forwarded while lifecycle remains in keepalive"]
+        P3 --> P4["Peer returns DATA ACK or application response"]
     end
 
-    subgraph ERROR["ERROR"]
-        E1["Faulting side latches low-level fault"] --> E2["ERROR packet reports code, state, counters, summary"]
-        E2 --> E3["Supervisor decides reset or initialize"]
+    subgraph RETRY["RETRY AND RESET"]
+        E1["Connect or keepalive fault occurs"] --> E2["Host retries through connect"]
+        E2 --> E3["Sequential keepalive-failure counter increments only for keepalive loss"]
+        E3 --> E4["After 5 sequential keepalive failures the host latches ConnectionFault"]
+        E4 --> E5["Host enters wait_for_com_reset until Reset Communication is pressed"]
     end

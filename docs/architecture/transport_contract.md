@@ -15,11 +15,11 @@ This file is the canonical machine-readable design baseline for low-level transp
 
 | Item | Owner | Notes |
 | --- | --- | --- |
-| `HostLiveInteger` | PC simulator host | Must advance every keep-alive period to prove host forward progress. |
-| `DeviceLiveInteger` | ESP32-C3 transport controller | Returned to let the host detect bridge-side stalls independently. |
+| `ServerLiveInteger` | ESP32-C3 bridge/server side | The bridge owns keepalive initiation toward the client session and sends the next authoritative server-side value first. |
+| `ClientLiveInteger` | ESP32-S3 client side | The client validates `ServerLiveInteger`, increments `ClientLiveInteger`, and returns it to the bridge. |
 | CRC validation | Low-level transport layer | FastAPI and high-level simulator logic should not re-implement integrity checks. |
-| Watchdog enforcement | Low-level transport layer on both sides | Missing forward progress forces transition to `error`. |
-| Recovery decision | Supervisory host logic | Only explicit `reset` recovers from `error`. |
+| Keepalive/watchdog timing | ESP32-C3 bridge/server side and ESP32-S3 client side | The bridge owns the active keepalive cadence and timeout detection for the server half of the link; the client validates and responds. |
+| Recovery decision | Supervisory host logic | The Python host mirrors bridge-reported faults, counts sequential keepalive failures, and enters `wait_for_com_reset` after threshold. |
 
 ## Shared Interface Boundary
 
@@ -41,7 +41,7 @@ This file is the canonical machine-readable design baseline for low-level transp
 | `server_port` | `3333` | TCP endpoint used for the low-level transport session. |
 | `wifi_connect_timeout_ms` | `10000` | Bound on low-level Wi-Fi association/visibility preparation. |
 | `tcp_connect_timeout_ms` | `3000` | Bound on TCP session establishment after Wi-Fi is ready. |
-| `keepalive_period_ms` | `100` | Host-driven keep-alive cadence. |
+| `keepalive_period_ms` | `100` | Bridge-driven keep-alive cadence. |
 
 ## Backend Launch Contract
 
@@ -83,61 +83,80 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 
 | State | Purpose | Entry Actions | Exit Conditions |
 | --- | --- | --- | --- |
-| `reset` | Stop transmission, clear buffers, and re-initialize the ESP controller. | Clear counters, buffers, stale link ownership, and active supervision before issuing `RESET`, then arm automatic progression into `initialize`. | Reset-send succeeds and automatic initialize can begin, or a reset fault occurs. |
-| `initialize` | Load the ESP controller with mirrored transport constants. | Validate mirrored COM/Wi-Fi/TCP configuration and send Wi-Fi/server constants. | Automatic hand-off into `connect`, or immediate fault occurs. |
-| `connect` | Wait for the ESP/controller stack to report real client connection success. | Hold the mirrored Wi-Fi-ready/connect-attempt context while waiting for an explicit client-connected indication from the ESP side. | Explicit client connection success promotes to `keepalive`, or timeout/fault occurs. |
-| `keepalive` | Supervise the active low-level connection. | Exchange liveness traffic, advance `HostLiveInteger`, and watch for missed responses. | Data traffic is enabled or keepalive supervision fails. |
-| `send_data` | Allow application payload traffic on the active low-level connection. | Send validated `DATA` frames while the keepalive path remains healthy. | Operator resumes keepalive focus or a supervision fault occurs. |
-| `error` | Latch low-level fault and block normal traffic. | Preserve error reason and last counters, stop forwarding payloads. | Explicit `reset` command only. |
+| `reset` | Stop transmission, clear buffers, and re-initialize the ESP controller. | Clear counters, buffers, stale link ownership, and active supervision before issuing `RESET`, then arm automatic progression into `initialize`. | Reset-send succeeds and automatic initialize can begin. |
+| `initialize` | Load the ESP controller with mirrored transport constants. | Validate mirrored COM/Wi-Fi/TCP configuration and send Wi-Fi/server constants. | Automatic hand-off into `connect`, or a blocking setup fault requires reset. |
+| `connect` | Wait for the ESP/controller stack to report real client connection success. | Hold the mirrored Wi-Fi-ready/connect-attempt context, zero both counters, and wait for an explicit client-connected indication or mirrored keepalive/data from the ESP side. | Explicit client connection success or first valid keepalive promotes to `keepalive`, or connect retry is scheduled. |
+| `keepalive` | Supervise the active low-level connection. | Mirror bridge-owned keepalive progress, track `ServerLiveInteger` and `ClientLiveInteger`, and watch for missed responses. | Valid keepalive clears `ConnectionFault`; repeated keepalive loss retries through `connect` until reset is required. |
+| `wait_for_com_reset` | Stop automatic retry churn after repeated keepalive failures or blocking COM/runtime faults. | Preserve `ConnectionFault`, keep the latest failure reason visible, and wait for explicit operator reset. | `Reset Communication` returns to `reset`. |
+
+## Python Runtime Responsibilities
+
+The Python simulator runtime remains active, but only as supervisory logic around the bridge-owned transport:
+
+- own the COM-port handle and serial lifetime through `server/transport/serial_link.py`
+- expose operator APIs in `server/api/routes.py`
+- mirror authoritative bridge state and counters into UI snapshots
+- validate mirrored configuration before sending `INITIALIZE`
+- drive the automatic host-visible progression `reset -> initialize -> connect`
+- count sequential bridge-reported keepalive failures and latch `ConnectionFault`
+- gate `DATA` so it is sent only after the bridge has proven `keepalive`
+
+The Python runtime must not:
+
+- originate low-level keepalive timing
+- derive transport timeout/fault conclusions from browser polling cadence
+- invent `ServerLiveInteger` or `ClientLiveInteger` values
 
 ## Transition Table
 
 | Current State | Trigger | Guard / Condition | Action | Next State | Timeout / Failure Behavior |
 | --- | --- | --- | --- | --- | --- |
-| `reset` | Reset command | Operator requests hard recovery or fresh start | Stop transmission, clear buffers, issue `RESET` to the ESP controller, and arm automatic initialize | `reset` | Reset-send failure moves to `error`. |
-| `reset` | Automatic progression | Reset completed and the runtime still owns a valid transport path | Send mirrored transport constants to the ESP controller | `initialize` | Validation, COM availability, or initialize transmit failure moves to `error`. |
-| `initialize` | Automatic progression | Mirrored constants were sent successfully | Automatically issue `CONNECT` and wait for the ESP response | `connect` | Connect transmit failure moves to `error`. |
-| `connect` | Client-connected response received | An explicit client-connected indication arrives in time | Enable keepalive supervision and send-data path | `keepalive` | Connect timeout or malformed response moves to `error`. |
-| `keepalive` | Send Data command | Connect success already enabled payload traffic | Send `DATA` frame while supervision remains active | `send_data` | Payload attempt before connect success moves to `error`. |
-| `keepalive` | Fault detected | Keepalive timeout, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit reset. |
-| `send_data` | Keepalive command | Operator resumes explicit liveness supervision | Send `KEEPALIVE` and continue supervising the active session | `keepalive` | Missing keepalive response moves to `error`. |
-| `send_data` | Fault detected | Keepalive timeout, watchdog timeout, malformed frame, transport loss | Latch fault and stop forwarding | `error` | Fault is terminal until explicit reset. |
-| `error` | Recovery command | Explicit hard recovery | Clear fault and restart stack | `reset` | No implicit recovery allowed. |
+| `reset` | Reset command | Operator requests hard recovery or fresh start | Stop transmission, clear buffers, issue `RESET` to the ESP controller, clear `ConnectionFault`, and arm automatic initialize | `reset` | Reset-send failure moves to `wait_for_com_reset`. |
+| `reset` | Automatic progression | Reset completed and the runtime still owns a valid transport path | Send mirrored transport constants to the ESP controller | `initialize` | Validation, COM availability, or initialize transmit failure moves to `wait_for_com_reset`. |
+| `initialize` | Automatic progression | Mirrored constants were sent successfully | Automatically issue `CONNECT`, zero both counters on bridge entry to `connect`, and wait for the ESP response | `connect` | Connect transmit failure moves to `wait_for_com_reset`. |
+| `connect` | Client-connected response or first mirrored keepalive received | TCP session has been proven alive | Enable keepalive supervision | `keepalive` | Connect timeout retries through `connect`. |
+| `keepalive` | Valid `KEEPALIVE` or mirrored `DATA` received | Counter exchange succeeds | Clear `ConnectionFault`, zero failure counter, keep application payloads enabled | `keepalive` | Keepalive loss retries through `connect`. After 5 sequential keepalive failures, the simulator enters `wait_for_com_reset`. |
+| `keepalive` | `DATA` command | Keepalive-ready connection is active | Send validated `DATA` while remaining in canonical keepalive state | `keepalive` | Payload attempt without keepalive-ready link moves to `wait_for_com_reset`. |
+| `wait_for_com_reset` | Recovery command | Explicit hard recovery | Clear fault and restart stack | `reset` | No implicit recovery allowed. |
 
 ## Packet Definitions
 
 | Packet | Purpose | Sender | Receiver | Required Fields | Normal Response | Timeout Rule | Error Handling |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `RESET` | Force hard reset and self-test. | Supervisory host | Low-level peer | `protocol_version`, `message_type`, reset profile/parameters, CRC | `RESET_ACK` | Supervisor expects bounded response time from reset path. | Failure enters `error`. |
-| `INITIALIZE` | Prepare low-level resources. | Supervisory host | Low-level peer | serial port, Wi-Fi SSID/password, server IP/port, watchdog settings, CRC | `INITIALIZE_ACK` | Initialization must complete before connect window expires. | Validation failure enters `error`. |
-| `CONNECT` | Enter active session. | Supervisory host | Low-level peer | connection role or endpoint reference, CRC | `CONNECT_ACK` | Session establishment timeout enters `error`. | Wi-Fi/TCP socket failure enters `error`. |
-| `KEEPALIVE` | Prove host forward progress. | PC simulator host | Low-level peer | incremented `HostLiveInteger`, sequence, CRC | `KEEPALIVE_ACK` with `DeviceLiveInteger` and status | Every 100 mSec. | Missing progress enters `error`. |
+| `RESET` | Force hard reset and self-test. | Supervisory host | Low-level peer | `protocol_version`, `message_type`, reset profile/parameters, CRC | `RESET_ACK` | Supervisor expects bounded response time from reset path. | Host-side reset transmit failures latch `ConnectionFault` and move to `wait_for_com_reset`. |
+| `INITIALIZE` | Prepare low-level resources. | Supervisory host | Low-level peer | serial port, Wi-Fi SSID/password, server IP/port, watchdog settings, CRC | `INITIALIZE_ACK` | Initialization must complete before connect window expires. | Invalid mirrored config or initialize transmit failure moves to `wait_for_com_reset`. |
+| `CONNECT` | Enter active session. | Supervisory host | Low-level peer | connection role or endpoint reference, CRC | `CONNECT_ACK` followed by `client_connected` or mirrored `KEEPALIVE` | Session-establishment timeout retries through `connect`. | COM/runtime transmit failure enters `wait_for_com_reset`. |
+| `KEEPALIVE` | Prove synchronized server/client forward progress. | ESP32-C3 bridge/server side | ESP32-S3 client side | current `ServerLiveInteger`, latest `ClientLiveInteger`, sequence, CRC | client returns `KEEPALIVE` with incremented `ClientLiveInteger`; bridge validates it and advances the next `ServerLiveInteger` | Every 100 mSec. | Missing counter progression retries through `connect` and enters `wait_for_com_reset` after 5 repeated failures. |
 | `DATA` | Carry application payload after validation. | Either side | Peer | payload, sequence, CRC | `ACK` or application response | Normal transport timeout policy applies. | Invalid frame is rejected before upper layer sees payload. |
-| `ERROR` | Report latched low-level fault. | Faulting side | Supervisory peer | error code, state, last counters, summary, CRC | Recovery command | Immediate supervisory review required. | Link remains in `error`. |
+| `ERROR` | Report low-level fault detail without introducing a host `error` state. | Faulting side | Supervisory peer | error code, state, last counters, summary, CRC | recovery logic or explicit reset | Immediate supervisory review required. | Bridge-reported keepalive loss retries through `connect`; blocking COM/runtime faults latch `ConnectionFault` and move the host to `wait_for_com_reset`. |
 
 ## Timing Rules
 
 - Keep-alive cadence is `100 mSec`.
-- The PC simulator host must advance `HostLiveInteger` every keep-alive period.
-- The ESP32-C3 transport controller should return `DeviceLiveInteger` so liveness is observable in both directions.
-- If expected liveness progress is not observed in time, the receiver must transition to `error`.
+- The ESP32-C3 bridge/server side owns keepalive initiation and resets both counters to `0` every time it enters `connect`.
+- The ESP32-S3 client side zeros both counters during `initialize`.
+- The ESP32-S3 client side increments `ClientLiveInteger` only after validating the current `ServerLiveInteger`.
+- After validating the returned `ClientLiveInteger`, the bridge advances `ServerLiveInteger` and sends the next keepalive.
+- The simulator host monitors the authoritative bridge counters over USB; it does not originate keepalive traffic itself.
+- The simulator host latches `ConnectionFault` after 5 sequential keepalive failures and waits in `wait_for_com_reset`.
+- Both counters wrap to `0` on overflow.
 
 ## Failure Modes
 
 | Failure Mode | Detection Point | Required Action | Allowed Recovery |
 | --- | --- | --- | --- |
-| CRC failure | Low-level frame parser | Drop frame and latch fault | `reset` |
-| Host watchdog failure | ESP32-C3 transport controller | Assume host stalled and latch fault | `reset` after host recovers |
-| Device watchdog failure | PC simulator host | Stop trusting link and latch fault | `reset` |
-| USB COM loss | Host or bridge | Stop transport and latch fault | `reset` after COM recovery |
-| COM port not found | Simulator host open/initialize path | Latch explicit COM availability fault before bridge initialization continues | `reset` after COM recovery |
-| Wi-Fi association failure | Bridge-side initialize/connect | Latch fault with Wi-Fi status | `reset` |
-| Configured AP offline / not visible | Bridge-side initialize/connect or mirrored simulator validation | Latch explicit AP-not-visible fault before claiming Wi-Fi-ready state | `reset` after RF or configuration changes |
-| TCP server not found / not listening | Bridge-side connect | Latch explicit server/listener availability fault | corrected endpoint plus `reset` |
-| Keepalive response timeout | Keepalive supervision | Latch explicit keepalive fault and stop progression | `reset` |
-| Generic unknown transport failure | Any stage without stronger evidence | Latch stage-specific fault and stop progressing state | `reset` |
-| TCP session loss | Bridge-side keepalive or send-data state | Latch fault and stop forwarding | `reset` |
-| Malformed packet / unsupported version | Parser | Reject packet and latch fault | `reset` after protocol correction |
+| CRC failure | Low-level frame parser | Drop frame and retry through `connect` | automatic retry or `reset` after threshold |
+| Bridge keepalive watchdog failure | ESP32-C3 transport controller | Report `keepalive_supervision_lost`, close stale TCP session, and let the host retry through `connect` | automatic retry until threshold, then `reset` |
+| Device-side keepalive failure | ESP32-S3 client transport layer | Stop trusting link and re-enter `connect` on the client side | automatic retry until threshold, then `reset` |
+| USB COM loss | Host or bridge | Close stale COM handle and wait for reopen | `reset` after COM recovery |
+| COM port not found | Simulator host open/initialize path | Latch explicit COM availability fault and move to `wait_for_com_reset` | `reset` after COM recovery |
+| Wi-Fi association failure | Bridge-side initialize/connect | Retry through `connect` while retaining mirrored configuration | automatic retry |
+| Configured AP offline / not visible | Bridge-side initialize/connect or mirrored simulator validation | Retry through `connect` or block initialize if Wi-Fi is disabled | automatic retry or `reset` after operator action |
+| TCP server not found / not listening | Bridge-side connect | Retry through `connect` | automatic retry |
+| Keepalive response timeout | Keepalive supervision | Count sequential keepalive failure and retry through `connect` | automatic retry until threshold, then `reset` |
+| Generic unknown transport failure | Any stage without stronger evidence | Preserve stage-specific fault text and retry or block as appropriate | retry or `reset` |
+| TCP session loss | Bridge-side keepalive state | Retry through `connect` | automatic retry |
+| Malformed packet / unsupported version | Parser | Reject packet and retry link bring-up | automatic retry or `reset` after threshold |
 
 ## Simulator UI State and Command Feedback
 
@@ -169,5 +188,6 @@ This section defines the required local runtime-launch behavior for the PC-hoste
 | --- | --- | --- |
 | Serial port unavailable during open/initialize | `COM port not found` | The simulator host can diagnose this locally because it owns the COM port. |
 | Empty or unavailable mirrored Wi-Fi SSID | `Wi-Fi AP is offline` | Used when the bridge-side AP contract is invalid before initialize can continue. |
+| Host-side Wi-Fi toggle is off | `Wi-Fi is disabled` | Used when the operator intentionally disabled the bridge SoftAP through the simulator UI. |
 | TCP endpoint invalid or bridge reports listener failure | `TCP server not found` | Reserved for bridge-side/server-listener availability faults. |
 | Stage fails without a stronger category | `generic unknown failure` | Fallback error for stage-specific failures without trustworthy root-cause evidence. |

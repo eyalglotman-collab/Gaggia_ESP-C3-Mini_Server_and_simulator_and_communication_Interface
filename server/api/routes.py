@@ -89,6 +89,30 @@ def close_transport() -> dict[str, object]:
     return _run_snapshot_action("close_transport", link_runtime.close_transport)
 
 
+@router.post("/transport/release-com")
+def release_com_port() -> dict[str, object]:
+    """@brief Force-release the configured COM port from likely owning PIDs.
+
+    @details The simulator first closes its own handle, then asks the
+    transport layer to terminate external serial tools that still appear to
+    hold the configured COM port.
+    """
+
+    return _run_snapshot_action("release_com_port", link_runtime.force_release_transport)
+
+
+@router.post("/transport/toggle-wifi")
+def toggle_wifi() -> dict[str, object]:
+    """@brief Toggle low-level Wi-Fi availability for transport testing.
+
+    @details This is a simulator-only operator control used to test reset and
+    connect behavior when Wi-Fi is intentionally disabled without changing the
+    saved SSID/password configuration values.
+    """
+
+    return _run_snapshot_action("toggle_wifi", link_runtime.toggle_wifi_enabled)
+
+
 @router.post("/command/reset")
 def command_reset() -> dict[str, object]:
     return _run_snapshot_action("command_reset", link_runtime.reset)

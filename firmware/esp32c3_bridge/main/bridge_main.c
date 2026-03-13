@@ -23,6 +23,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -43,6 +44,8 @@
 #define BRIDGE_WIFI_MAX_CONNECTIONS     4
 #define BRIDGE_TCP_PORT                 3333
 #define BRIDGE_TCP_RX_BUFFER_SIZE       512
+#define BRIDGE_KEEPALIVE_PERIOD_MS      100
+#define BRIDGE_KEEPALIVE_TIMEOUT_MS     350
 
 #define BRIDGE_SOF_BYTE0                0xA5
 #define BRIDGE_SOF_BYTE1                0x5A
@@ -83,11 +86,25 @@ typedef enum {
 } bridge_transport_t;
 
 static bridge_state_t s_bridge_state = BRIDGE_STATE_RESET;
-static uint32_t s_device_live_integer = BRIDGE_DEVICE_LIVE_START;
+static uint32_t s_server_live_integer = 0U;
+static uint32_t s_client_live_integer = 0U;
+static uint16_t s_usb_sequence = 0U;
+static bool s_wifi_stack_initialized = false;
+static bool s_wifi_transport_enabled = true;
 static int s_tcp_listen_fd = -1;
 static int s_tcp_client_fd = -1;
+static int64_t s_last_tcp_activity_us = 0;
+static int64_t s_last_keepalive_tx_us = 0;
 static size_t s_tcp_rx_length = 0U;
 static uint8_t s_tcp_rx_buffer[BRIDGE_TCP_RX_BUFFER_SIZE] = {0};
+static bool s_keepalive_response_pending = false;
+
+static esp_err_t bridge_tcp_server_init(void);
+static void bridge_close_tcp_client(void);
+static void bridge_notify_usb_fault(const char *payload_text);
+static void bridge_send_server_keepalive(void);
+static void bridge_service_keepalive_engine(void);
+static void bridge_service_transport_watchdog(void);
 
 /**
  * @brief Compute CRC16-CCITT for the provided byte sequence.
@@ -217,14 +234,14 @@ static void bridge_send_frame(
     frame[2] = (uint8_t)message_type;
     frame[3] = (uint8_t)(payload_length & 0xFFU);
     frame[4] = (uint8_t)((payload_length >> 8) & 0xFFU);
-    frame[5] = (uint8_t)(request_frame->host_live_integer & 0xFFU);
-    frame[6] = (uint8_t)((request_frame->host_live_integer >> 8) & 0xFFU);
-    frame[7] = (uint8_t)((request_frame->host_live_integer >> 16) & 0xFFU);
-    frame[8] = (uint8_t)((request_frame->host_live_integer >> 24) & 0xFFU);
-    frame[9] = (uint8_t)(s_device_live_integer & 0xFFU);
-    frame[10] = (uint8_t)((s_device_live_integer >> 8) & 0xFFU);
-    frame[11] = (uint8_t)((s_device_live_integer >> 16) & 0xFFU);
-    frame[12] = (uint8_t)((s_device_live_integer >> 24) & 0xFFU);
+    frame[5] = (uint8_t)(s_server_live_integer & 0xFFU);
+    frame[6] = (uint8_t)((s_server_live_integer >> 8) & 0xFFU);
+    frame[7] = (uint8_t)((s_server_live_integer >> 16) & 0xFFU);
+    frame[8] = (uint8_t)((s_server_live_integer >> 24) & 0xFFU);
+    frame[9] = (uint8_t)(s_client_live_integer & 0xFFU);
+    frame[10] = (uint8_t)((s_client_live_integer >> 8) & 0xFFU);
+    frame[11] = (uint8_t)((s_client_live_integer >> 16) & 0xFFU);
+    frame[12] = (uint8_t)((s_client_live_integer >> 24) & 0xFFU);
     frame[13] = (uint8_t)(request_frame->sequence & 0xFFU);
     frame[14] = (uint8_t)((request_frame->sequence >> 8) & 0xFFU);
 
@@ -242,7 +259,32 @@ static void bridge_send_frame(
     } else if (transport == BRIDGE_TRANSPORT_TCP && s_tcp_client_fd >= 0) {
         (void)send(s_tcp_client_fd, frame, frame_length, 0);
     }
-    s_device_live_integer += 1U;
+}
+
+/**
+ * @brief Send one unsolicited bridge status frame to the simulator host.
+ *
+ * @details The ESP32-C3 owns the real Wi-Fi/TCP session with the client. When
+ * transport progress occurs on the TCP side, the bridge mirrors that progress
+ * back to the simulator host over USB so the UI can display the authoritative
+ * `ServerLiveInteger` and `ClientLiveInteger` values.
+ *
+ * @param[in] message_type Mirrored message type for the simulator host.
+ * @param[in] payload_text Optional UTF-8 payload text.
+ */
+static void bridge_send_unsolicited_usb_frame(
+    bridge_message_type_t message_type,
+    const char *payload_text)
+{
+    bridge_frame_t synthetic_frame = {
+        .message_type = message_type,
+        .host_live_integer = s_server_live_integer,
+        .device_live_integer = s_client_live_integer,
+        .sequence = s_usb_sequence++,
+        .payload_length = 0U,
+    };
+
+    bridge_send_frame(BRIDGE_TRANSPORT_USB, message_type, &synthetic_frame, payload_text);
 }
 
 /**
@@ -283,38 +325,44 @@ static esp_err_t bridge_transport_init(void)
  */
 static esp_err_t bridge_wifi_init_softap(void)
 {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
+    esp_err_t ret = ESP_OK;
+
+    if (!s_wifi_stack_initialized) {
         ret = nvs_flash_init();
-    }
-    if (ret != ESP_OK) {
-        return ret;
-    }
+        if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_init();
+        }
+        if (ret != ESP_OK) {
+            return ret;
+        }
 
-    ret = esp_netif_init();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        return ret;
-    }
+        ret = esp_netif_init();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
 
-    ret = esp_event_loop_create_default();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        return ret;
-    }
+        ret = esp_event_loop_create_default();
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
 
-    if (esp_netif_create_default_wifi_ap() == NULL) {
-        return ESP_FAIL;
-    }
+        if (esp_netif_create_default_wifi_ap() == NULL) {
+            return ESP_FAIL;
+        }
 
-    wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ret = esp_wifi_init(&wifi_init_cfg);
-    if (ret != ESP_OK) {
-        return ret;
-    }
+        wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ret = esp_wifi_init(&wifi_init_cfg);
+        if (ret != ESP_OK) {
+            return ret;
+        }
 
-    ret = esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    if (ret != ESP_OK) {
-        return ret;
+        ret = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        s_wifi_stack_initialized = true;
     }
 
     wifi_config_t wifi_cfg = {0};
@@ -337,7 +385,71 @@ static esp_err_t bridge_wifi_init_softap(void)
         return ret;
     }
 
-    return esp_wifi_start();
+    ret = esp_wifi_start();
+    if (ret == ESP_OK) {
+        s_wifi_transport_enabled = true;
+    }
+    return ret;
+}
+
+/**
+ * @brief Close the active TCP listener used by the SoftAP transport.
+ *
+ * @details Wi-Fi disable tears down both the AP and its listener so the client
+ * can no longer discover or connect to the server-side endpoint.
+ */
+static void bridge_tcp_server_deinit(void)
+{
+    if (s_tcp_listen_fd >= 0) {
+        close(s_tcp_listen_fd);
+        s_tcp_listen_fd = -1;
+    }
+}
+
+/**
+ * @brief Stop the SoftAP and close active transport sockets.
+ *
+ * @details The simulator Wi-Fi toggle must affect the real ESP32-C3 transport
+ * endpoint, not just host-side bookkeeping. Stopping the AP and listener makes
+ * the client lose the low-level server path immediately.
+ */
+static void bridge_wifi_disable_transport(void)
+{
+    bridge_close_tcp_client();
+    bridge_tcp_server_deinit();
+    if (s_wifi_stack_initialized) {
+        (void)esp_wifi_stop();
+    }
+    s_wifi_transport_enabled = false;
+    s_bridge_state = BRIDGE_STATE_RESET;
+}
+
+/**
+ * @brief Ensure the bridge SoftAP and TCP listener are available.
+ *
+ * @details Re-enables the real ESP32-C3 transport endpoint after a simulator
+ * Wi-Fi disable request.
+ *
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_* if Wi-Fi or TCP listener startup fails
+ */
+static esp_err_t bridge_wifi_enable_transport(void)
+{
+    esp_err_t ret = bridge_wifi_init_softap();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    if (s_tcp_listen_fd < 0) {
+        ret = bridge_tcp_server_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    s_wifi_transport_enabled = true;
+    return ESP_OK;
 }
 
 /**
@@ -396,7 +508,102 @@ static void bridge_close_tcp_client(void)
         close(s_tcp_client_fd);
         s_tcp_client_fd = -1;
     }
+    s_last_tcp_activity_us = 0;
+    s_last_keepalive_tx_us = 0;
+    s_keepalive_response_pending = false;
     s_tcp_rx_length = 0U;
+}
+
+/**
+ * @brief Report one low-level bridge fault to the simulator host over USB.
+ *
+ * @details The Python simulator should mirror authoritative bridge/runtime
+ * faults instead of inventing timing failures from UI polling cadence.
+ *
+ * @param[in] payload_text Short ASCII fault reason.
+ */
+static void bridge_notify_usb_fault(const char *payload_text)
+{
+    bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ERROR, payload_text);
+}
+
+/**
+ * @brief Transmit the current authoritative server keepalive to the client.
+ *
+ * @details The bridge owns keepalive initiation. It sends the current
+ * `ServerLiveInteger` and latest validated `ClientLiveInteger`, then waits for
+ * the client to return the incremented device counter.
+ */
+static void bridge_send_server_keepalive(void)
+{
+    bridge_frame_t synthetic_keepalive = {0};
+
+    if (s_tcp_client_fd < 0) {
+        return;
+    }
+
+    bridge_send_frame(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_KEEPALIVE, &synthetic_keepalive, "keepalive");
+    bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_KEEPALIVE, "keepalive");
+    s_last_keepalive_tx_us = esp_timer_get_time();
+    s_keepalive_response_pending = true;
+}
+
+/**
+ * @brief Pace bridge-owned keepalive initiation at the configured cadence.
+ *
+ * @details Once a TCP client is attached and the previous keepalive exchange
+ * has completed successfully, the bridge sends the next authoritative
+ * keepalive after the fixed period. This avoids using unrelated TCP activity
+ * as a proxy for transport liveness.
+ */
+static void bridge_service_keepalive_engine(void)
+{
+    int64_t now_us = 0;
+
+    if (s_tcp_client_fd < 0 ||
+        s_keepalive_response_pending ||
+        s_bridge_state != BRIDGE_STATE_CONNECT) {
+        return;
+    }
+
+    now_us = esp_timer_get_time();
+    if (s_last_keepalive_tx_us != 0 &&
+        (now_us - s_last_keepalive_tx_us) < ((int64_t)BRIDGE_KEEPALIVE_PERIOD_MS * 1000LL)) {
+        return;
+    }
+
+    bridge_send_server_keepalive();
+}
+
+/**
+ * @brief Enforce the low-level TCP keepalive watchdog inside the bridge.
+ *
+ * @details The ESP32-C3 owns the real TCP session with the client and must be
+ * the source of truth for connection-loss detection. If client traffic stops
+ * beyond the watchdog grace period, the bridge reports the fault upstream over
+ * USB and closes the stale TCP session locally.
+ */
+static void bridge_service_transport_watchdog(void)
+{
+    int64_t now_us = 0;
+
+    if (s_tcp_client_fd < 0 ||
+        !s_keepalive_response_pending ||
+        s_last_keepalive_tx_us <= 0 ||
+        s_bridge_state != BRIDGE_STATE_CONNECT) {
+        return;
+    }
+
+    now_us = esp_timer_get_time();
+    if ((now_us - s_last_keepalive_tx_us) <= ((int64_t)BRIDGE_KEEPALIVE_TIMEOUT_MS * 1000LL)) {
+        return;
+    }
+
+    bridge_notify_usb_fault("keepalive_supervision_lost");
+    bridge_close_tcp_client();
+    s_bridge_state = BRIDGE_STATE_INITIALIZE;
+    s_server_live_integer = 0U;
+    s_client_live_integer = 0U;
 }
 
 /**
@@ -411,17 +618,26 @@ static void bridge_close_tcp_client(void)
  */
 static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame_t *frame)
 {
+    char payload_text[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+
     if (frame == NULL) {
         return;
+    }
+
+    if (frame->payload_length > 0U) {
+        memcpy(payload_text, frame->payload, frame->payload_length);
+        payload_text[frame->payload_length] = '\0';
     }
 
     switch (frame->message_type) {
     case BRIDGE_MESSAGE_RESET:
         s_bridge_state = BRIDGE_STATE_RESET;
+        s_server_live_integer = 0U;
+        s_client_live_integer = 0U;
+        s_last_keepalive_tx_us = 0;
+        s_keepalive_response_pending = false;
         bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "reset_ack");
-        if (transport == BRIDGE_TRANSPORT_TCP) {
-            bridge_close_tcp_client();
-        }
+        bridge_close_tcp_client();
         break;
     case BRIDGE_MESSAGE_INITIALIZE:
         s_bridge_state = BRIDGE_STATE_INITIALIZE;
@@ -429,7 +645,22 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
         break;
     case BRIDGE_MESSAGE_CONNECT:
         s_bridge_state = BRIDGE_STATE_CONNECT;
-        bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "client_connected");
+        s_server_live_integer = 0U;
+        s_client_live_integer = 0U;
+        s_last_tcp_activity_us = (s_tcp_client_fd >= 0) ? esp_timer_get_time() : 0;
+        s_last_keepalive_tx_us = 0;
+        s_keepalive_response_pending = false;
+        if (transport == BRIDGE_TRANSPORT_TCP) {
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "client_connected");
+            bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ACK, "client_connected");
+            bridge_send_server_keepalive();
+        } else {
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "connect_ack");
+        }
+        if (transport == BRIDGE_TRANSPORT_USB && s_tcp_client_fd >= 0) {
+            bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ACK, "client_connected");
+            bridge_send_server_keepalive();
+        }
         break;
     case BRIDGE_MESSAGE_DISCONNECT:
         s_bridge_state = BRIDGE_STATE_DISCONNECT;
@@ -439,10 +670,41 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
         }
         break;
     case BRIDGE_MESSAGE_KEEPALIVE:
-        bridge_send_frame(transport, BRIDGE_MESSAGE_KEEPALIVE, frame, "keepalive_ack");
+        if (transport == BRIDGE_TRANSPORT_TCP) {
+            uint32_t expected_client_live_integer = s_server_live_integer + 1U;
+            if (frame->host_live_integer != s_server_live_integer ||
+                frame->device_live_integer != expected_client_live_integer) {
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ERROR, frame, "keepalive_counter_mismatch");
+                bridge_notify_usb_fault("keepalive_counter_mismatch");
+                bridge_close_tcp_client();
+                s_bridge_state = BRIDGE_STATE_ERROR;
+                break;
+            }
+
+            s_last_tcp_activity_us = esp_timer_get_time();
+            s_client_live_integer = frame->device_live_integer;
+            s_server_live_integer = s_client_live_integer + 1U;
+            s_keepalive_response_pending = false;
+            s_bridge_state = BRIDGE_STATE_CONNECT;
+            bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_KEEPALIVE, "keepalive");
+        } else {
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "usb_keepalive_not_supported");
+        }
         break;
     case BRIDGE_MESSAGE_DATA:
-        bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
+        if (transport == BRIDGE_TRANSPORT_USB && strcmp(payload_text, "wifi_disable") == 0) {
+            bridge_wifi_disable_transport();
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "wifi_disabled");
+        } else if (transport == BRIDGE_TRANSPORT_USB && strcmp(payload_text, "wifi_enable") == 0) {
+            esp_err_t ret = bridge_wifi_enable_transport();
+            if (ret == ESP_OK) {
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "wifi_enabled");
+            } else {
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ERROR, frame, "wifi_enable_failed");
+            }
+        } else {
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
+        }
         break;
     case BRIDGE_MESSAGE_ERROR:
         s_bridge_state = BRIDGE_STATE_ERROR;
@@ -495,10 +757,16 @@ static void bridge_accept_tcp_client(void)
     }
 
     s_tcp_client_fd = accepted_fd;
+    s_last_tcp_activity_us = esp_timer_get_time();
+    s_last_keepalive_tx_us = 0;
     s_tcp_rx_length = 0U;
     s_bridge_state = BRIDGE_STATE_CONNECT;
+    s_server_live_integer = 0U;
+    s_client_live_integer = 0U;
+    s_keepalive_response_pending = false;
     ESP_LOGI(TAG, "Accepted TCP client");
-    bridge_send_frame(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_ACK, &synthetic_connect, "client_connected");
+    bridge_send_frame(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_ACK, &synthetic_connect, "tcp_connected");
+    bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ACK, "tcp_connected");
 }
 
 /**
@@ -506,6 +774,9 @@ static void bridge_accept_tcp_client(void)
  *
  * @details TCP is stream-oriented, so the bridge buffers bytes until a whole
  * framed request is available before dispatching it through the shared parser.
+ * Accepting the socket alone is not enough to start keepalive traffic; the
+ * client must still send its framed `CONNECT` request so both sides reset the
+ * live-integer baseline at the same protocol point.
  */
 static void bridge_poll_tcp_client(void)
 {
@@ -566,10 +837,12 @@ static void bridge_poll_tcp_client(void)
 
         if (bridge_parse_frame(s_tcp_rx_buffer, frame_length, &frame) != ESP_OK) {
             ESP_LOGW(TAG, "Closing TCP client: frame parse failed");
+            bridge_notify_usb_fault("tcp_frame_parse_failed");
             bridge_close_tcp_client();
             return;
         }
 
+        s_last_tcp_activity_us = esp_timer_get_time();
         bridge_handle_frame(BRIDGE_TRANSPORT_TCP, &frame);
         memmove(s_tcp_rx_buffer, &s_tcp_rx_buffer[frame_length], s_tcp_rx_length - frame_length);
         s_tcp_rx_length -= frame_length;
@@ -612,8 +885,12 @@ void app_main(void)
     }
 
     while (1) {
-        bridge_accept_tcp_client();
-        bridge_poll_tcp_client();
+        if (s_wifi_transport_enabled) {
+            bridge_accept_tcp_client();
+            bridge_poll_tcp_client();
+            bridge_service_keepalive_engine();
+            bridge_service_transport_watchdog();
+        }
 
         int received = usb_serial_jtag_read_bytes(
             rx_buffer,

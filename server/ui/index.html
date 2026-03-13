@@ -913,6 +913,7 @@
                     </label>
                     <button id="openButton" type="button">Open Port</button>
                     <button id="closeButton" type="button">Close Port</button>
+                    <button id="releaseComButton" type="button">Release COM Port</button>
                   </div>
                 </div>
 
@@ -964,18 +965,12 @@
                   <div class="section-header">
                     <div>
                       <div class="section-kicker">Lifecycle Actions</div>
-                      <h3 class="section-title">State Command Surface and Logger</h3>
+                      <h3 class="section-title">Canonical Command Surface and Logger</h3>
                     </div>
                   </div>
                   <div class="command-grid">
-                    <button id="resetButton" type="button">Reset</button>
-                    <button id="initializeButton" type="button">Initialize</button>
-                    <button id="keepaliveButton" type="button">Keepalive</button>
-                    <button id="sendDataButton" type="button">Send Data</button>
-                  </div>
-                  <div class="payload-box">
-                    <div class="label">Send Data Payload</div>
-                    <textarea id="sendDataPayload">Ada Lovelace is widely regarded as one of the first computer programmers.</textarea>
+                    <button id="wifiToggleButton" type="button">Enable/Disable Wifi</button>
+                    <button id="resetButton" type="button">Reset Communication</button>
                   </div>
                 </section>
 
@@ -989,11 +984,11 @@
                   <div id="states" class="states"></div>
                   <div id="connectionIntegers" class="connection-integers">
                     <div class="connection-integer">
-                      <div class="k">Server Live Integer</div>
+                      <div class="k">ServerLiveInteger</div>
                       <div id="serverConnectionInteger" class="v">0</div>
                     </div>
                     <div class="connection-integer">
-                      <div class="k">Client Live Integer</div>
+                      <div class="k">ClientLiveInteger</div>
                       <div id="clientConnectionInteger" class="v">0</div>
                     </div>
                   </div>
@@ -1061,11 +1056,9 @@
       applyConfigButton: document.getElementById('applyConfigButton'),
       openButton: document.getElementById('openButton'),
       closeButton: document.getElementById('closeButton'),
+      releaseComButton: document.getElementById('releaseComButton'),
+      wifiToggleButton: document.getElementById('wifiToggleButton'),
       resetButton: document.getElementById('resetButton'),
-      initializeButton: document.getElementById('initializeButton'),
-      keepaliveButton: document.getElementById('keepaliveButton'),
-      sendDataButton: document.getElementById('sendDataButton'),
-      sendDataPayload: document.getElementById('sendDataPayload'),
       loggerToggleButton: document.getElementById('loggerToggleButton'),
       navOperational: document.getElementById('navOperational'),
       navLifecycle: document.getElementById('navLifecycle'),
@@ -1101,25 +1094,9 @@
     let loggerPaused = false;
     let stateVisuals = {};
     let configSyncTimer = null;
-    const wikiSentences = [
-      'The printing press accelerated the spread of scientific ideas across Europe.',
-      'The Nile River supported dense agricultural settlements in ancient Egypt.',
-      'The periodic table organizes elements by atomic number and recurring chemical properties.',
-      'The Internet emerged from packet-switching research funded in the late twentieth century.',
-      'Plate tectonics explains the motion of Earths lithospheric plates over geologic time.',
-      'Photosynthesis converts light energy into chemical energy stored in glucose.',
-      'The Library of Alexandria became a lasting symbol of accumulated knowledge.',
-      'Antibiotics transformed modern medicine by allowing bacterial infections to be treated effectively.',
-      'The steam engine played a central role in the Industrial Revolution.',
-      'Saturn is known for its extensive ring system composed mostly of ice particles.',
-    ];
-
-    const asyncButtons = ['openButton', 'closeButton', 'applyConfigButton', 'resetButton', 'initializeButton', 'keepaliveButton', 'sendDataButton'];
+    const asyncButtons = ['openButton', 'closeButton', 'releaseComButton', 'applyConfigButton', 'wifiToggleButton', 'resetButton'];
     const commandStateMap = {
       resetButton: 'reset',
-      initializeButton: 'initialize',
-      keepaliveButton: 'keepalive',
-      sendDataButton: 'send_data',
     };
 
     async function callJson(url, options = {}) {
@@ -1131,10 +1108,6 @@
 
     async function snapshot() {
       return callJson('/api/link');
-    }
-
-    function randomWikiSentence() {
-      return wikiSentences[Math.floor(Math.random() * wikiSentences.length)];
     }
 
     function collectConfigPayload() {
@@ -1191,10 +1164,14 @@
       elements.flash.classList.toggle('error', error);
     }
 
+    function snapshotHasBlockingFault(snapshot) {
+      return Boolean(snapshot.connection_fault || snapshot.current_state === 'wait_for_com_reset');
+    }
+
     function setFlashFromSnapshot(snapshot, fallback = 'Updated.') {
       const transport = snapshot.transport || {};
       const message = snapshot.last_error || transport.last_error || transport.last_event || fallback;
-      setFlash(message, Boolean(snapshot.last_error || transport.last_error));
+      setFlash(message, snapshotHasBlockingFault(snapshot));
     }
 
     function syncLoggerToggle() {
@@ -1224,8 +1201,10 @@
       snapshot.available_states.forEach((state) => {
         next[state] = 'inactive';
       });
-      if (snapshot.current_state) next[snapshot.current_state] = snapshot.last_error ? 'failure' : 'success';
-      if (!snapshot.last_error && snapshot.current_state === 'reset') next.reset = 'inactive';
+      if (snapshot.current_state) {
+        next[snapshot.current_state] = snapshotHasBlockingFault(snapshot) ? 'failure' : 'success';
+      }
+      if (!snapshotHasBlockingFault(snapshot) && snapshot.current_state === 'reset') next.reset = 'inactive';
       stateVisuals = next;
     }
 
@@ -1313,9 +1292,17 @@
     }
 
     function renderConnectionIntegers(snapshot) {
-      elements.serverConnectionInteger.textContent = String(snapshot.device_live_integer ?? 0);
-      elements.clientConnectionInteger.textContent = String(snapshot.host_live_integer ?? 0);
+      elements.serverConnectionInteger.textContent = String(snapshot.server_live_integer ?? 0);
+      elements.clientConnectionInteger.textContent = String(snapshot.client_live_integer ?? 0);
       elements.receivedClientText.textContent = snapshot.important_data['Text Received From Client'] || 'No client text received yet.';
+    }
+
+    function renderWifiToggle(snapshot) {
+      const wifiEnabled = Boolean(snapshot.wifi_enabled);
+      elements.wifiToggleButton.textContent = `Enable/Disable Wifi (${wifiEnabled ? 'On' : 'Off'})`;
+      clearButtonState(elements.wifiToggleButton);
+      elements.wifiToggleButton.classList.toggle('success', wifiEnabled);
+      elements.wifiToggleButton.classList.toggle('failure', !wifiEnabled);
     }
 
     function syncInputValue(input, value) {
@@ -1326,7 +1313,8 @@
     function updateSummary(snapshot) {
       const transport = snapshot.transport || {};
 
-      if (snapshot.last_error) setChipState(elements.statusTransport, 'danger', 'Transport Error');
+      if (snapshotHasBlockingFault(snapshot)) setChipState(elements.statusTransport, 'danger', 'Reset Required');
+      else if (snapshot.last_error) setChipState(elements.statusTransport, 'warn', 'Retrying Connection');
       else if (transport.port_open) setChipState(elements.statusTransport, 'ok', `Port Open: ${snapshot.config.serial_port}`);
       else setChipState(elements.statusTransport, 'warn', 'Transport Idle');
 
@@ -1353,9 +1341,7 @@
       syncInputValue(elements.wifiTimeout, snapshot.config.wifi_connect_timeout_ms);
       syncInputValue(elements.tcpTimeout, snapshot.config.tcp_connect_timeout_ms);
       syncInputValue(elements.keepaliveMs, snapshot.config.keepalive_period_ms);
-      const connectPassed = snapshot.important_data['Connect Passed'] === 'Yes';
-      elements.keepaliveButton.disabled = !connectPassed || !['keepalive', 'send_data'].includes(snapshot.current_state);
-      elements.sendDataButton.disabled = !connectPassed || snapshot.important_data['Send Data Enabled'] !== 'Yes';
+      renderWifiToggle(snapshot);
 
       updateSummary(snapshot);
       setFlashFromSnapshot(snapshot, 'Transport snapshot updated.');
@@ -1386,10 +1372,10 @@
           body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method: 'POST' }
         );
         resetStateVisuals(payload);
-        if (targetState) setStateVisual(targetState, payload.last_error ? 'failure' : 'success');
+        if (targetState) setStateVisual(targetState, snapshotHasBlockingFault(payload) ? 'failure' : 'success');
         render(payload);
         if (button) {
-          setButtonState(button, payload.last_error ? 'failure' : 'success');
+          setButtonState(button, snapshotHasBlockingFault(payload) ? 'failure' : 'success');
           window.setTimeout(() => clearButtonState(button), 700);
         }
       } catch (error) {
@@ -1417,18 +1403,10 @@
     elements.navImportantData.addEventListener('click', () => activateWindow('important-data'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
+    elements.releaseComButton.addEventListener('click', () => post('/api/transport/release-com', null, elements.releaseComButton));
     elements.applyConfigButton.addEventListener('click', () => post('/api/config', collectConfigPayload(), elements.applyConfigButton));
+    elements.wifiToggleButton.addEventListener('click', () => post('/api/transport/toggle-wifi', null, elements.wifiToggleButton));
     elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
-    elements.initializeButton.addEventListener('click', () => post('/api/command/initialize', null, elements.initializeButton));
-    elements.keepaliveButton.addEventListener('click', () => post('/api/command/keepalive', null, elements.keepaliveButton));
-    elements.sendDataButton.addEventListener('click', () => {
-      elements.sendDataPayload.value = randomWikiSentence();
-      post(
-        '/api/command/send-data',
-        { payload_text: elements.sendDataPayload.value },
-        elements.sendDataButton,
-      );
-    });
     elements.loggerToggleButton.addEventListener('click', () => {
       loggerPaused = !loggerPaused;
       syncLoggerToggle();

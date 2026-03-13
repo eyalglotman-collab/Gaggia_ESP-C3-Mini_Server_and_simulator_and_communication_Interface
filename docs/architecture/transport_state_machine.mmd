@@ -1,24 +1,33 @@
 stateDiagram-v2
     [*] --> reset
-    reset --> initialize: reset complete / self-test passed
-    initialize --> connect: send mirrored Wi-Fi/TCP constants, keep SoftAP visible, and auto-start connect
-    initialize --> error: COM unavailable / invalid Wi-Fi-TCP config / bridge bring-up failure
-    connect --> keepalive: connect_ack / keepalive / data response received
-    connect --> error: connect timeout, malformed frame, USB loss, Wi-Fi loss, TCP loss
-    keepalive --> send_data: data transmit enabled after connect success
-    keepalive --> error: keepalive timeout / watchdog failure
-    send_data --> keepalive: keepalive command resumes supervision
-    send_data --> error: keepalive timeout / watchdog failure
-    error --> reset: explicit hard recovery
+    reset --> initialize: reset complete / auto progression armed
+    initialize --> connect: INITIALIZE sent successfully
+    initialize --> wait_for_com_reset: COM unavailable / invalid mirrored config / bridge setup failure
+    connect --> keepalive: client_connected / mirrored KEEPALIVE / mirrored DATA
+    connect --> wait_for_com_reset: bridge reports blocking transport fault
+    keepalive --> connect: bridge reports transport loss
+    keepalive --> wait_for_com_reset: 5 sequential bridge-reported keepalive failures
+    wait_for_com_reset --> reset: explicit Reset Communication
 
     state reset {
-        [*] --> self_test
-        self_test --> load_params
-        load_params --> mirror_defaults: COM4 + visible EyalSimulatorAP + 192.168.4.1:3333
+        [*] --> clear_host_state
+        clear_host_state --> send_reset
+        send_reset --> arm_initialize
+    }
+
+    state initialize {
+        [*] --> validate_mirrored_config
+        validate_mirrored_config --> send_initialize
     }
 
     state connect {
-        [*] --> wifi_ready
-        wifi_ready --> tcp_session_wait
-        tcp_session_wait --> wait_for_connect_response
+        [*] --> send_connect
+        send_connect --> wait_for_bridge_events
     }
+
+    note right of keepalive
+        The ESP32-C3 bridge owns the real
+        TCP keepalive watchdog and counter
+        supervision. The Python runtime
+        mirrors bridge events only.
+    end note

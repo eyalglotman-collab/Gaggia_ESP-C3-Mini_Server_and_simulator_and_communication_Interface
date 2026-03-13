@@ -1,16 +1,10 @@
 flowchart TD
-    CRC["CRC failure"] --> ERR["error state"]
-    HOST["Host watchdog failure"] --> ERR
-    DEV["Device watchdog failure"] --> ERR
-    USB["USB COM loss"] --> ERR
-    COMCFG["COM port not found"] --> ERR
-    WIFI["Wi-Fi association failure"] --> ERR
-    WIFIOFF["Configured AP offline / not visible"] --> ERR
-    TCP["TCP session loss"] --> ERR
-    TCPNF["TCP server not found / not listening"] --> ERR
-    KAT["Keepalive response timeout"] --> ERR
-    GEN["Generic unknown transport failure"] --> ERR
-    MAL["Malformed packet / bad version"] --> ERR
+    CFG["Host-side config invalid or COM unavailable"] --> WAIT["wait_for_com_reset"]
+    BRIDGE["Bridge reports blocking transport fault"] --> WAIT
+    KEEP["Bridge reports keepalive_supervision_lost"] --> RETRY["retry through connect"]
+    TCP["Bridge reports tcp_frame_parse_failed / tcp session loss"] --> RETRY
+    COUNT["5 sequential keepalive_supervision_lost reports"] --> WAIT
 
-    ERR --> HARD["reset"]
-    HARD --> CONN["initialize -> connect after normal sequence"]
+    RETRY --> CONN["connect"]
+    WAIT --> RESET["Reset Communication"]
+    RESET --> INIT["reset -> initialize -> connect"]

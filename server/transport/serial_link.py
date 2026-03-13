@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -78,6 +80,21 @@ class SerialLinkManager:
         self._last_error = error
         self._log(message if not error else f"{message} ({error})")
 
+    def _detach_serial_locked(self, message: str, error: str = "") -> Any | None:
+        """@brief Drop the current serial handle after an unrecoverable port fault.
+
+        @details Flashing or resetting the ESP32-C3 can invalidate the current
+        Windows COM handle. The simulator must stop using that stale handle and
+        return the port to a closed state so the operator can reopen it cleanly.
+        """
+
+        current = self._serial
+        self._reader_running = False
+        self._serial = None
+        self._reader_thread = None
+        self._set_event(message, error)
+        return current
+
     def configure_port(self, port_name: str) -> SerialLinkSnapshot:
         with self._lock:
             self._port_name = port_name.strip() or self._port_name
@@ -135,8 +152,27 @@ class SerialLinkManager:
             self._set_event(f"Closed serial port {self._port_name}.")
             return self._snapshot_locked()
 
+    def force_release_port(self) -> tuple[SerialLinkSnapshot, list[int]]:
+        """@brief Close the local serial handle and hard-stop external holders.
+
+        @details The simulator owns the port directly when it is open. This
+        helper first closes the local handle, then uses Windows process
+        command-line heuristics to find likely external tools still holding the
+        same COM port and force-kills them.
+        @return Current snapshot plus the list of external PIDs that were terminated.
+        """
+
+        self.close_port()
+        released_pids = self._kill_external_port_holders()
+        with self._lock:
+            detail = ", ".join(str(pid) for pid in released_pids) if released_pids else "none"
+            self._set_event(f"Hard COM release executed for {self._port_name}.")
+            self._log(f"Forced COM release killed PIDs: {detail}.")
+            return self._snapshot_locked(), released_pids
+
     def send_frame(self, frame: Frame) -> SerialLinkSnapshot:
         data = encode_frame(frame)
+        stale_serial: Any | None = None
         with self._lock:
             current = self._serial
             if current is None or not getattr(current, "is_open", False):
@@ -144,13 +180,22 @@ class SerialLinkManager:
             try:
                 current.write(data)
             except Exception as exc:
-                self._set_event(f"TX failed on {self._port_name}.", str(exc))
-                raise RuntimeError(str(exc)) from exc
-            self._tx_frames += 1
-            self._tx_bytes += len(data)
-            self._last_tx_at = self._timestamp()
-            self._set_event(f"TX {frame.message_type.name} seq={frame.sequence} host={frame.host_live_integer} bytes={len(data)}")
-            return self._snapshot_locked()
+                stale_serial = self._detach_serial_locked(f"TX failed on {self._port_name}.", str(exc))
+                snapshot = self._snapshot_locked()
+            else:
+                self._tx_frames += 1
+                self._tx_bytes += len(data)
+                self._last_tx_at = self._timestamp()
+                self._set_event(f"TX {frame.message_type.name} seq={frame.sequence} host={frame.host_live_integer} bytes={len(data)}")
+                return self._snapshot_locked()
+        if stale_serial is not None:
+            try:
+                if getattr(stale_serial, "is_open", False):
+                    stale_serial.close()
+            except Exception:
+                pass
+            raise RuntimeError(snapshot.last_error or f"Serial port {self._port_name} write failed.")
+        raise RuntimeError(f"Serial port {self._port_name} write failed.")
 
     def pop_received_frames(self) -> list[Frame]:
         with self._lock:
@@ -166,6 +211,16 @@ class SerialLinkManager:
         """
 
         with self._lock:
+            current = self._serial
+            if current is not None and getattr(current, "is_open", False):
+                try:
+                    current.reset_input_buffer()
+                except Exception:
+                    pass
+                try:
+                    current.reset_output_buffer()
+                except Exception:
+                    pass
             self._rx_buffer.clear()
             self._rx_frames.clear()
             self._set_event("Cleared serial RX buffers.")
@@ -178,6 +233,75 @@ class SerialLinkManager:
         with self._lock:
             return self._snapshot_locked()
 
+    def _kill_external_port_holders(self) -> list[int]:
+        """@brief Force-stop likely external processes holding the COM port.
+
+        @details Native Windows does not expose owning-PID lookup for COM ports
+        directly in the standard library, so the simulator uses process
+        command-line heuristics for the configured COM name and common serial
+        tooling patterns such as monitor, esptool, and pyserial launches.
+        @return List of terminated process IDs.
+        """
+
+        if os.name != "nt":
+            return []
+
+        port_name = self._port_name
+        ps_command = (
+            "$port = '{0}'; "
+            "$regex = [regex]::Escape($port); "
+            "$candidates = Get-CimInstance Win32_Process | "
+            "Where-Object {{ $_.CommandLine -and "
+            "(($_.CommandLine -match $regex) -or "
+            "($_.CommandLine -match 'idf_monitor|esptool|monitor_capture|serial\\.Serial|serial_for_url|pyserial')) }} | "
+            "Select-Object ProcessId, Name, CommandLine; "
+            "$candidates | ConvertTo-Json -Compress"
+        ).format(port_name.replace("'", "''"))
+
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", ps_command],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return []
+
+        stdout = result.stdout.strip()
+        if not stdout:
+            return []
+
+        try:
+            decoded = json.loads(stdout)
+        except json.JSONDecodeError:
+            return []
+
+        entries = decoded if isinstance(decoded, list) else [decoded]
+        released_pids: list[int] = []
+        current_pid = os.getpid()
+
+        for entry in entries:
+            try:
+                process_id = int(entry.get("ProcessId"))
+            except Exception:
+                continue
+            if process_id == current_pid:
+                continue
+
+            kill_result = subprocess.run(
+                ["taskkill", "/F", "/PID", str(process_id)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if kill_result.returncode == 0:
+                released_pids.append(process_id)
+
+        return released_pids
+
     def _reader_loop(self) -> None:
         while self._reader_running:
             current = self._serial
@@ -187,10 +311,19 @@ class SerialLinkManager:
             try:
                 chunk = current.read(256)
             except Exception as exc:  # pragma: no cover
+                stale_serial: Any | None = None
                 with self._lock:
-                    self._set_event(f"Serial read failed on {self._port_name}.", str(exc))
-                sleep(0.1)
-                continue
+                    stale_serial = self._detach_serial_locked(
+                        f"Serial read failed on {self._port_name}.",
+                        str(exc),
+                    )
+                if stale_serial is not None:
+                    try:
+                        if getattr(stale_serial, "is_open", False):
+                            stale_serial.close()
+                    except Exception:
+                        pass
+                break
             if not chunk:
                 sleep(0.02)
                 continue

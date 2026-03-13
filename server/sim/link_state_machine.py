@@ -22,8 +22,7 @@ class LinkState(StrEnum):
     INITIALIZE = "initialize"
     CONNECT = "connect"
     KEEPALIVE = "keepalive"
-    SEND_DATA = "send_data"
-    ERROR = "error"
+    WAIT_FOR_COM_RESET = "wait_for_com_reset"
 
 
 @dataclass(slots=True)
@@ -50,11 +49,14 @@ class TransportConfig:
 class LinkSnapshot:
     current_state: str
     serial_port: str
+    wifi_enabled: bool
     config: dict[str, object]
     last_transition_at: str
     watchdog_armed: bool
-    host_live_integer: int
-    device_live_integer: int
+    connection_fault: bool
+    server_live_integer: int
+    client_live_integer: int
+    consecutive_keepalive_failures: int
     sequence: int
     last_error: str
     important_data: dict[str, str]
@@ -77,26 +79,24 @@ class LinkRuntime:
         self._current_state = LinkState.RESET
         self._config = TransportConfig()
         self._last_transition_at = self._timestamp()
-        self._host_live_integer = 0
-        self._device_live_integer = 0
+        self._server_live_integer = 0
+        self._client_live_integer = 0
+        self._connection_fault = False
+        self._consecutive_keepalive_failures = 0
         self._sequence = 0
         self._watchdog_armed = False
-        self._last_keepalive_tx: datetime | None = None
-        self._last_valid_rx: datetime | None = None
-        self._connect_requested_at: datetime | None = None
-        self._keepalive_ack_pending = False
         self._pending_auto_stage: LinkState | None = None
         self._last_error = ""
         self._last_monitor_event = "Simulator monitor ready."
         self._last_monitor_at = self._timestamp()
         self._last_snapshot_poll_at: datetime | None = None
+        self._wifi_enabled = True
         self._wifi_ready = False
         self._wifi_connected = False
         self._tcp_connected = False
         self._bridge_ready = False
         self._initialize_completed = False
         self._connect_completed = False
-        self._send_data_enabled = False
         self._last_received_client_text = "No client text received yet."
         self._append_log("Transport runtime ready. Default state is reset.")
 
@@ -133,27 +133,64 @@ class LinkRuntime:
         """
 
         self._watchdog_armed = False
-        self._last_keepalive_tx = None
-        self._last_valid_rx = None
-        self._connect_requested_at = None
-        self._keepalive_ack_pending = False
         self._initialize_completed = False
         self._connect_completed = False
-        self._send_data_enabled = False
         self._pending_auto_stage = None
         self._last_received_client_text = "No client text received yet."
 
-    def _set_error(self, message: str) -> None:
-        """@brief Latch an error and move the low-level runtime into `error`.
+    def _clear_connection_fault_locked(self) -> None:
+        """@brief Clear the connection-fault latch after a valid keepalive exchange.
 
-        @details Centralizes error transitions so the snapshot keeps the same
-        last-error semantics across COM, Wi-Fi configuration, and TCP stages.
+        @details The simulator keeps the same sequential-failure behavior as the
+        client. One successful keepalive proves both sides are synchronized
+        again, so the retry counter and the latched operator fault are cleared.
+        """
+
+        self._connection_fault = False
+        self._consecutive_keepalive_failures = 0
+
+    def _set_runtime_fault_locked(self, message: str) -> None:
+        """@brief Latch a blocking connection fault and wait for explicit reset.
+
+        @details Runtime faults that the operator must inspect drive the
+        simulator into `wait_for_com_reset` instead of an `error` state so the
+        server lifecycle matches the current client transport design.
         """
 
         self._clear_runtime_flow_locked()
         self._tcp_connected = False
         self._wifi_connected = False
-        self._set_state(LinkState.ERROR, "Transport fault latched.", message)
+        self._connection_fault = True
+        self._last_error = message
+        self._set_state(LinkState.WAIT_FOR_COM_RESET, "Connection fault latched. Waiting for Reset Communication.", message)
+
+    def _schedule_reconnect_locked(self, message: str, *, keepalive_failure: bool) -> None:
+        """@brief Retry through `connect` or stop in `wait_for_com_reset`.
+
+        @details The simulator retries low-level link loss automatically until
+        five sequential keepalive failures have been observed. After that it
+        latches `ConnectionFault` and waits for an explicit reset action.
+        """
+
+        self._clear_runtime_flow_locked()
+        self._tcp_connected = False
+        self._wifi_connected = False
+        self._last_error = message
+
+        if keepalive_failure:
+            self._consecutive_keepalive_failures += 1
+            self._append_log(
+                "Keepalive failure recorded "
+                f"({self._consecutive_keepalive_failures}/5): {message}"
+            )
+            if self._consecutive_keepalive_failures >= 5:
+                self._set_runtime_fault_locked(message)
+                return
+        if self._current_state is LinkState.WAIT_FOR_COM_RESET:
+            return
+        self._set_state(LinkState.CONNECT, "Transport retry scheduled through connect.", message)
+        self._wifi_connected = False
+        self._tcp_connected = False
 
     def _try_send_command_locked(
         self,
@@ -170,7 +207,7 @@ class LinkRuntime:
         try:
             self._send_command_locked(message_type, payload_text)
         except RuntimeError as exc:
-            self._set_error(f"{failure_prefix}: {exc}")
+            self._set_runtime_fault_locked(f"{failure_prefix}: {exc}")
             return False
         return True
 
@@ -183,10 +220,10 @@ class LinkRuntime:
 
         config_error = self._validate_config_locked()
         if config_error is not None:
-            self._set_error(config_error)
+            self._set_runtime_fault_locked(config_error)
             return
         if not serial_link_manager.get_snapshot().port_open:
-            self._set_error("COM port not found")
+            self._set_runtime_fault_locked("COM port not found")
             return
 
         self._wifi_ready = True
@@ -205,23 +242,19 @@ class LinkRuntime:
     def _begin_connect_locked(self, reason: str) -> None:
         """@brief Start the connect stage after initialize has completed.
 
-        @details Connect is automatically entered by the server runtime once
-        the mirrored constants were sent successfully to the ESP controller.
+        @details Connect is now a monitor-only state on the Python side. The
+        ESP32-C3 bridge owns the real TCP listener and low-level handshake with
+        the client, so the host no longer sends a duplicate `CONNECT` command
+        over USB. Instead, the host enters `connect` and waits for the bridge
+        to mirror `tcp_connected`/`client_connected` progress.
         """
 
         if not self._wifi_ready:
-            self._set_error("initialize did not complete before connect")
-            return
-        if not self._try_send_command_locked(
-            MessageType.CONNECT,
-            f"server={self._config.server_ip}:{self._config.server_port}",
-            "connect transmit failed",
-        ):
+            self._set_runtime_fault_locked("initialize did not complete before connect")
             return
         self._pending_auto_stage = None
         self._initialize_completed = True
-        self._connect_requested_at = datetime.now(UTC)
-        self._wifi_connected = True
+        self._wifi_connected = False
         self._tcp_connected = False
         self._set_state(LinkState.CONNECT, reason)
 
@@ -229,11 +262,10 @@ class LinkRuntime:
         """@brief Progress the automatic reset-to-keepalive sequence.
 
         @details The runtime advances one stage per snapshot poll so the UI can
-        observe reset, initialize, and connect as distinct server states.
+        observe reset, initialize, and connect as distinct server states while
+        the ESP32-C3 bridge remains the sole owner of the real TCP handshake.
         """
 
-        if self._current_state is LinkState.ERROR:
-            return
         if self._current_state is LinkState.RESET and self._pending_auto_stage is LinkState.INITIALIZE:
             self._begin_initialize_locked("Automatic progression entered initialize.")
             return
@@ -258,7 +290,8 @@ class LinkRuntime:
                 self._last_snapshot_poll_at = now
             self._last_monitor_event = f"{category}: {message}"
             self._last_monitor_at = self._timestamp()
-            self._append_log(f"[monitor] {self._last_monitor_event}")
+            if category != "poll":
+                self._append_log(f"[monitor] {self._last_monitor_event}")
 
     def capture_internal_failure(self, context: str, exc: Exception) -> LinkSnapshot:
         """@brief Latch an unexpected internal exception as a safe snapshot.
@@ -271,7 +304,7 @@ class LinkRuntime:
             detail = "".join(format_exception_only(type(exc), exc)).strip()
             self._last_monitor_event = f"fail-safe: {context}"
             self._last_monitor_at = self._timestamp()
-            self._set_error(f"{context}: {detail or 'generic unknown failure'}")
+            self._set_runtime_fault_locked(f"{context}: {detail or 'generic unknown failure'}")
             return self._snapshot_locked()
 
     def _next_sequence(self) -> int:
@@ -301,11 +334,14 @@ class LinkRuntime:
 
         @details The simulator host mirrors the client configuration contract
         and surfaces explicit configuration faults before trying to drive the
-        bridge through the low-level initialize/connect sequence.
+        bridge through the low-level initialize/connect sequence. Runtime
+        keepalive/watchdog ownership itself lives on the bridge firmware.
         """
 
         if not self._config.serial_port.strip():
             return "COM port not found"
+        if not self._wifi_enabled:
+            return "Wi-Fi is disabled"
         if not self._config.wifi_ssid.strip():
             return "Wi-Fi AP is offline"
         if not self._config.server_ip.strip():
@@ -324,21 +360,47 @@ class LinkRuntime:
         after the ESP controller confirms the active transport session.
         """
 
-        for frame in serial_link_manager.pop_received_frames():
-            self._last_valid_rx = datetime.now(UTC)
-            self._device_live_integer = max(self._device_live_integer, frame.device_live_integer)
-            self._append_log(f"Received {frame.message_type.name} seq={frame.sequence} host={frame.host_live_integer} device={frame.device_live_integer}.")
+        frames = serial_link_manager.pop_received_frames()
+        if not frames:
+            return
+
+        reconnect_scheduled = False
+
+        for frame in frames:
+            self._server_live_integer = frame.host_live_integer
+            self._client_live_integer = frame.device_live_integer
+            self._append_log(
+                f"Received {frame.message_type.name} seq={frame.sequence} "
+                f"server={frame.host_live_integer} client={frame.device_live_integer}."
+            )
             payload_text = frame.payload.decode("utf-8", errors="ignore").strip().lower()
 
             if frame.message_type == MessageType.ERROR:
-                self._set_error(payload_text or "generic unknown failure")
-                continue
+                self._schedule_reconnect_locked(
+                    payload_text or "generic unknown failure",
+                    keepalive_failure=(payload_text == "keepalive_supervision_lost"),
+                )
+                reconnect_scheduled = True
+                break
 
             if frame.message_type in (MessageType.KEEPALIVE, MessageType.DATA):
                 self._watchdog_armed = True
                 self._wifi_connected = True
                 self._tcp_connected = True
                 self._bridge_ready = True
+                self._clear_connection_fault_locked()
+                if self._current_state is LinkState.CONNECT:
+                    self._pending_auto_stage = None
+                    self._connect_completed = True
+                    self._set_state(
+                        LinkState.KEEPALIVE,
+                        "Mirrored bridge keepalive/data traffic confirmed the TCP session. Server state advanced to keepalive.",
+                    )
+                    if frame.message_type == MessageType.DATA:
+                        self._last_received_client_text = (
+                            frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
+                        )
+                    continue
 
             if self._current_state is LinkState.CONNECT and payload_text == "connect_ack":
                 self._wifi_connected = True
@@ -350,68 +412,61 @@ class LinkRuntime:
                 continue
 
             if self._current_state is LinkState.CONNECT and payload_text in CONNECT_SUCCESS_PAYLOADS:
-                self._connect_requested_at = None
-                self._keepalive_ack_pending = False
                 self._pending_auto_stage = None
                 self._connect_completed = True
-                self._send_data_enabled = True
-                self._watchdog_armed = True
+                # Do not arm keepalive supervision until the first real
+                # keepalive/data exchange occurs. Connect success alone only
+                # proves the session exists, not that keepalive traffic has
+                # already started.
+                self._watchdog_armed = False
                 self._wifi_connected = True
                 self._tcp_connected = True
                 self._bridge_ready = True
                 self._set_state(
                     LinkState.KEEPALIVE,
-                    "Explicit client connection success received. Server state advanced to keepalive supervision.",
+                    "Explicit client connection success received. Server state advanced to keepalive ready.",
                 )
                 continue
 
-            if self._current_state in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-                self._keepalive_ack_pending = False
+            if self._current_state is LinkState.KEEPALIVE:
                 if frame.message_type == MessageType.DATA:
                     self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
-                    self._send_data_enabled = True
-                    self._set_state(
-                        LinkState.SEND_DATA,
-                        "ESP controller acknowledged data traffic. Send-data path remains enabled.",
-                    )
 
-    def _evaluate_watchdog_locked(self) -> None:
-        """@brief Apply connect and keepalive supervision timers.
-
-        @details The connect phase waits for an ESP-side connect response, and
-        the keepalive path expects forward progress after each keepalive TX.
-        Any missed deadline forces the runtime into `error`.
-        """
-
-        now = datetime.now(UTC)
-
-        if self._current_state is LinkState.CONNECT and self._connect_requested_at is not None:
-            if now - self._connect_requested_at > timedelta(milliseconds=self._config.tcp_connect_timeout_ms):
-                self._set_error("TCP server not found")
-                return
-
-        if self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-            return
-
-        if self._keepalive_ack_pending and self._last_keepalive_tx is not None:
-            if now - self._last_keepalive_tx > timedelta(milliseconds=WATCHDOG_GRACE_MS):
-                self._set_error("keepalive response timeout")
-                return
-
-        if self._watchdog_armed and self._last_valid_rx is not None:
-            if now - self._last_valid_rx > timedelta(milliseconds=WATCHDOG_GRACE_MS):
-                self._set_error("keepalive supervision lost")
+        if reconnect_scheduled:
+            serial_link_manager.clear_buffers()
 
     def _send_command_locked(self, message_type: MessageType, payload_text: str = "") -> None:
         frame = Frame(
             message_type=message_type,
-            host_live_integer=self._host_live_integer,
-            device_live_integer=self._device_live_integer,
+            host_live_integer=self._server_live_integer,
+            device_live_integer=self._client_live_integer,
             sequence=self._next_sequence(),
             payload=payload_text.encode("utf-8"),
         )
         serial_link_manager.send_frame(frame)
-        self._append_log(f"Sent {message_type.name} seq={frame.sequence} host={frame.host_live_integer}.")
+        self._append_log(f"Sent {message_type.name} seq={frame.sequence} server={frame.host_live_integer}.")
+
+    def _sync_bridge_wifi_state_locked(self) -> None:
+        """@brief Push the simulator Wi-Fi state down to the ESP32-C3 bridge.
+
+        @details Backend restarts reset the host-side `wifi_enabled` flag to its
+        default, but the bridge may still hold the previous runtime state. This
+        sync step makes the physical SoftAP state deterministic whenever the COM
+        port is opened or otherwise re-synchronized.
+        """
+
+        transport_snapshot = serial_link_manager.get_snapshot()
+        if not transport_snapshot.port_open:
+            return
+
+        self._send_command_locked(
+            MessageType.DATA,
+            "wifi_enable" if self._wifi_enabled else "wifi_disable",
+        )
+        self._append_log(
+            "Synchronized bridge Wi-Fi state to "
+            + ("enabled." if self._wifi_enabled else "disabled.")
+        )
 
     def configure_port(self, port_name: str) -> LinkSnapshot:
         with self._lock:
@@ -465,6 +520,14 @@ class LinkRuntime:
             return self._snapshot_locked()
 
     def open_transport(self, port_name: str | None = None) -> LinkSnapshot:
+        """@brief Open the COM port and force a clean bridge resynchronization.
+
+        @details Opening the simulator onto an already-active bridge session
+        can expose stale keepalive/error frames from the previous runtime. The
+        open path therefore clears serial buffers and immediately issues a
+        low-level RESET so the host always starts from a known transport state.
+        """
+
         with self._lock:
             if port_name:
                 self._config.serial_port = port_name.strip() or self._config.serial_port
@@ -480,13 +543,15 @@ class LinkRuntime:
         except RuntimeError:
             with self._lock:
                 self._bridge_ready = False
-                self._set_error("COM port not found")
+                self._set_runtime_fault_locked("COM port not found")
                 return self._snapshot_locked()
 
         with self._lock:
             self._bridge_ready = True
-            self._append_log("Serial transport opened.")
-            return self._snapshot_locked()
+            self._append_log("Serial transport opened. Forcing clean bridge reset before accepting transport traffic.")
+
+        serial_link_manager.clear_buffers()
+        return self.reset()
 
     def close_transport(self) -> LinkSnapshot:
         with self._lock:
@@ -498,23 +563,78 @@ class LinkRuntime:
             self._append_log("Serial transport closed.")
             return self._snapshot_locked()
 
+    def force_release_transport(self) -> LinkSnapshot:
+        """@brief Force-release the configured COM port from all likely holders.
+
+        @details Closes the simulator-owned handle first, then hard-stops
+        external processes that match the configured COM port and known serial
+        tooling patterns.
+        """
+
+        with self._lock:
+            snapshot, released_pids = serial_link_manager.force_release_port()
+            self._clear_runtime_flow_locked()
+            self._bridge_ready = False
+            self._wifi_ready = False
+            self._wifi_connected = False
+            self._tcp_connected = False
+            self._clear_connection_fault_locked()
+            self._set_state(LinkState.RESET, "Hard COM release executed. Communication returned to reset idle.")
+            detail = ", ".join(str(pid) for pid in released_pids) if released_pids else "none"
+            self._append_log(f"Release COM Port terminated external PIDs: {detail}.")
+            return self._snapshot_locked()
+
+    def toggle_wifi_enabled(self) -> LinkSnapshot:
+        """@brief Toggle the low-level Wi-Fi availability flag for testing.
+
+        @details This does not change the saved SSID/password values. It simply
+        simulates whether the transport runtime is allowed to proceed into the
+        Wi-Fi/TCP phases during the automatic reset-to-keepalive flow.
+        """
+
+        with self._lock:
+            self._wifi_enabled = not self._wifi_enabled
+            transport_snapshot = serial_link_manager.get_snapshot()
+            if transport_snapshot.port_open:
+                try:
+                    self._send_command_locked(
+                        MessageType.DATA,
+                        "wifi_enable" if self._wifi_enabled else "wifi_disable",
+                    )
+                except RuntimeError as exc:
+                    self._append_log(f"Wi-Fi bridge control command failed: {exc}")
+            self._clear_runtime_flow_locked()
+            self._wifi_ready = False
+            self._wifi_connected = False
+            self._tcp_connected = False
+            self._bridge_ready = transport_snapshot.port_open
+            self._clear_connection_fault_locked()
+            self._set_state(
+                LinkState.RESET,
+                "Low-level bridge Wi-Fi enabled."
+                if self._wifi_enabled
+                else "Low-level bridge Wi-Fi disabled.",
+            )
+            return self._snapshot_locked()
+
     def reset(self) -> LinkSnapshot:
         """@brief Stop transmission, clear buffers, and reset the ESP controller.
 
-        @details Reset is the only permitted recovery path from `error`. It
-        clears all buffered transport state, drops active supervision, and
-        re-initializes the low-level controller with a RESET frame.
+        @details Reset clears all buffered transport state, drops active
+        supervision, clears `ConnectionFault`, and re-initializes the low-level
+        controller with a RESET frame.
         """
 
         with self._lock:
             serial_link_manager.clear_buffers()
-            self._host_live_integer = 0
-            self._device_live_integer = 0
+            self._server_live_integer = 0
+            self._client_live_integer = 0
             self._clear_runtime_flow_locked()
             self._wifi_ready = False
             self._wifi_connected = False
             self._tcp_connected = False
             self._bridge_ready = False
+            self._clear_connection_fault_locked()
             self._set_state(LinkState.RESET, "Server reset issued. Transmission stopped and buffers cleared.")
             if not self._try_send_command_locked(
                 MessageType.RESET,
@@ -536,65 +656,47 @@ class LinkRuntime:
 
         with self._lock:
             self._poll_received_frames_locked()
-            if self._current_state is LinkState.ERROR:
-                self._append_log("Initialize ignored because reset is required to clear the latched error.")
+            if self._current_state is LinkState.WAIT_FOR_COM_RESET:
+                self._append_log("Initialize ignored because Reset Communication is required to clear the latched fault.")
                 return self._snapshot_locked()
             self._clear_runtime_flow_locked()
             self._begin_initialize_locked("Initialize command started automatic controller loading.")
             return self._snapshot_locked()
 
     def send_keepalive(self) -> LinkSnapshot:
-        """@brief Drive the active keepalive state and supervise the response.
+        """@brief Return the current snapshot for the bridge-owned keepalive path.
 
-        @details Keepalive is only valid once connect has succeeded. A missing
-        response or stalled transport advances the runtime to `error`.
+        @details The ESP32-C3 bridge now owns keepalive initiation against the
+        client TCP session, so the simulator host no longer emits keepalive
+        frames directly over USB.
         """
 
         with self._lock:
             self._poll_received_frames_locked()
-            if self._current_state is LinkState.ERROR:
-                self._append_log("Keepalive ignored because reset is required to clear the latched error.")
-                return self._snapshot_locked()
-            if not self._initialize_completed or not self._connect_completed:
-                self._set_error("keepalive invoke rejected: server has not completed initialize and connect")
-                return self._snapshot_locked()
-            if self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-                self._set_error("keepalive invoke rejected: active keepalive state is not available")
-                return self._snapshot_locked()
-            self._host_live_integer += 1
-            if not self._try_send_command_locked(
-                MessageType.KEEPALIVE,
-                "keepalive",
-                "keepalive transmit failed",
-            ):
-                return self._snapshot_locked()
-            self._last_keepalive_tx = datetime.now(UTC)
-            self._keepalive_ack_pending = True
-            self._watchdog_armed = True
-            if self._current_state is not LinkState.KEEPALIVE:
-                self._set_state(LinkState.KEEPALIVE, "Keepalive supervision resumed.")
+            self._append_log("Keepalive command surface is monitor-only; the bridge owns keepalive initiation.")
             return self._snapshot_locked()
 
     def send_data(self, payload_text: str = "espresso_payload") -> LinkSnapshot:
         """@brief Send application data only after keepalive is active.
 
-        @details The send-data command remains disabled until the connect phase
-        succeeds. The runtime stays in `send_data` while data traffic is
-        allowed, but error recovery still requires `reset`.
+        @details The send-data command remains disabled until the keepalive
+        phase has been proven. The server runtime stays in `keepalive` while
+        data traffic is allowed so the lifecycle remains canonical with the
+        client transport design.
 
         @param[in] payload_text UTF-8 payload text to transmit in the DATA frame.
         """
 
         with self._lock:
             self._poll_received_frames_locked()
-            if self._current_state is LinkState.ERROR:
-                self._append_log("Send data ignored because reset is required to clear the latched error.")
+            if self._current_state is LinkState.WAIT_FOR_COM_RESET:
+                self._append_log("Send data ignored because Reset Communication is required to clear the latched fault.")
                 return self._snapshot_locked()
             if not self._initialize_completed or not self._connect_completed:
-                self._set_error("send data invoke rejected: server has not completed initialize and connect")
+                self._set_runtime_fault_locked("send data invoke rejected: server has not completed initialize and connect")
                 return self._snapshot_locked()
-            if not self._send_data_enabled or self._current_state not in (LinkState.KEEPALIVE, LinkState.SEND_DATA):
-                self._set_error("send data invoke rejected: keepalive-ready connection is not available")
+            if self._current_state is not LinkState.KEEPALIVE:
+                self._set_runtime_fault_locked("send data invoke rejected: keepalive-ready connection is not available")
                 return self._snapshot_locked()
             if not self._try_send_command_locked(
                 MessageType.DATA,
@@ -602,14 +704,13 @@ class LinkRuntime:
                 "send data transmit failed",
             ):
                 return self._snapshot_locked()
-            self._set_state(LinkState.SEND_DATA, "Send-data command issued.")
+            self._set_state(LinkState.KEEPALIVE, "Send-data command issued during keepalive.")
             return self._snapshot_locked()
 
     def get_snapshot(self) -> LinkSnapshot:
         with self._lock:
             self._poll_received_frames_locked()
             self._advance_automatic_flow_locked()
-            self._evaluate_watchdog_locked()
             return self._snapshot_locked()
 
     def _snapshot_locked(self) -> LinkSnapshot:
@@ -618,6 +719,7 @@ class LinkRuntime:
             "Current State": self._current_state.value,
             "Serial Port": self._config.serial_port,
             "Port Open": "Yes" if transport_snapshot.port_open else "No",
+            "Wi-Fi Enabled": "Yes" if self._wifi_enabled else "No",
             "Wi-Fi SSID": self._config.wifi_ssid,
             "Server Endpoint": f"{self._config.server_ip}:{self._config.server_port}",
             "Wi-Fi Ready": "Yes" if self._wifi_ready else "No",
@@ -626,13 +728,14 @@ class LinkRuntime:
             "Connect Passed": "Yes" if self._connect_completed else "No",
             "Wi-Fi Connected": "Yes" if self._wifi_connected else "No",
             "TCP Connected": "Yes" if self._tcp_connected else "No",
-            "Send Data Enabled": "Yes" if self._send_data_enabled else "No",
+            "ConnectionFault": "Yes" if self._connection_fault else "No",
+            "Keepalive Failures": str(self._consecutive_keepalive_failures),
             "Text Received From Client": self._last_received_client_text,
             "Wi-Fi Timeout (ms)": str(self._config.wifi_connect_timeout_ms),
             "TCP Timeout (ms)": str(self._config.tcp_connect_timeout_ms),
             "Keepalive Period (ms)": str(self._config.keepalive_period_ms),
-            "HostLiveInteger": str(self._host_live_integer),
-            "DeviceLiveInteger": str(self._device_live_integer),
+            "ServerLiveInteger": str(self._server_live_integer),
+            "ClientLiveInteger": str(self._client_live_integer),
             "Sequence": str(self._sequence),
             "Watchdog Armed": "Yes" if self._watchdog_armed else "No",
             "Last Transition": self._last_transition_at,
@@ -645,11 +748,14 @@ class LinkRuntime:
         return LinkSnapshot(
             current_state=self._current_state.value,
             serial_port=self._config.serial_port,
+            wifi_enabled=self._wifi_enabled,
             config=asdict(self._config),
             last_transition_at=self._last_transition_at,
             watchdog_armed=self._watchdog_armed,
-            host_live_integer=self._host_live_integer,
-            device_live_integer=self._device_live_integer,
+            connection_fault=self._connection_fault,
+            server_live_integer=self._server_live_integer,
+            client_live_integer=self._client_live_integer,
+            consecutive_keepalive_failures=self._consecutive_keepalive_failures,
             sequence=self._sequence,
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
