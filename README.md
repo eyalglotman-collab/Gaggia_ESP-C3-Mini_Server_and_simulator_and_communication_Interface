@@ -1,218 +1,116 @@
 # Eyal Espresso Server Simulator
 
-## Session Release Notes
+Host-side simulator for the Eyal Espresso transport and controller link. This project provides the server half of the system, a browser-based operator UI, and an optional ESP32-C3 bridge firmware for serial-to-TCP integration.
 
-- Last released version in git: `0.1.0`
-- Release commit: pending initial repository commit
-- Version numbering reminder for release notes:
-  - `X`: major architecture or feature-set changes
-  - `Y`: minor functionality additions and bug-fix milestones
-  - `Z`: patch/sub-version increments after accepted successful verification cycles
-- Current intent:
-  - simulate the Gaggia controller side of the system
-  - expose operator and test controls through a FastAPI-based interface
-  - communicate with the client side over a USB serial COM interface
+## Purpose
 
-## Project Workflow Rules
+The simulator exists to let the client firmware connect to a controllable server-side environment during transport and integration work. It owns:
 
-- Continue from [TODO_CONTINUE.md](TODO_CONTINUE.md) when resuming simulator transport-debug work in this repo.
-- Treat that file as the persistent handoff/TODO note for the next session before making new transport changes.
+- A FastAPI backend for simulator control and status snapshots.
+- A browser UI served by the backend.
+- A single-owner serial transport manager for the connected COM port.
+- A low-level link state machine that mirrors the client transport contract.
+- Optional ESP32-C3 bridge firmware that turns USB serial control into a Wi-Fi AP plus TCP listener for the ESP32-S3 client.
 
-- Product requirements and application design shall be maintained in `docs/EyalEspressoServerSimulatorRequirements and Design.docx`.
-- `README.md` is the workflow/session handoff file; the requirements/design document is the primary place for application requirements, UX intent, architecture decisions, and planned features.
-- Build and flash for firmware targets must be run sequentially, never in parallel.
-- The required order is: build first, then flash the produced binary.
-- After every `flash` or `monitor` call on a COM port, close all processes attached to that COM port before continuing.
-- Do not leave `idf.py`, `idf_monitor.py`, PowerShell wrappers, Python wrappers, serial helpers, or any other PID attached to the target COM port after the command completes.
-- Codex has explicit permission to run commands that release a COM port and terminate the exact processes holding that COM port when cleanup is required.
-- At the start of work in this repository, Codex must read the documentation set under `docs/` and learn the purpose and structure of each maintained document before making design or implementation decisions.
-- The required documentation review includes at minimum:
-  - `docs/EyalEspressoServerSimulatorRequirements and Design.docx`
-  - `docs/EyalEspressoServerSimulatorDetailedDesign.docx`
-  - `docs/REVISION_HISTORY.doc`
-  - `docs/VERSIONING.md`
-  - the maintained text architecture sources under `docs/architecture/`
-- Every time Codex opens and reviews `docs/EyalEspressoServerSimulatorRequirements and Design.docx`, Codex must update the document field `Reviewed on` with the current time.
-- After any documentation change in this repository, Codex must ask Eyal whether to open the `docs` folder.
-- Design documentation must be maintained in dual format:
-  - human review artifacts in `.docx`
-  - machine-readable architecture sources under `docs/architecture/`
-- The required machine-readable architecture sources are:
-  - `docs/architecture/transport_state_machine.mmd`
-  - `docs/architecture/packet_flows.mmd`
-  - `docs/architecture/failure_modes.mmd`
-  - `docs/architecture/transport_contract.md`
-- The text-based architecture sources are the canonical editable design source for workflow/state/packet behavior; rendered diagrams and `.docx` content must match them.
-- When workflow, state machines, packet definitions, failure handling, ownership, timing, watchdog rules, or transport architecture change, update both:
-  - the relevant `.docx` design documents
-  - the matching files under `docs/architecture/`
-- Do not maintain image-only diagrams as the sole source of truth. Every important workflow/state/failure diagram must also exist as text-based Mermaid and as structured tables in markdown.
-- Use exact code-facing names in documentation for states, packet types, counters, modules, and events. Do not rename concepts in prose if the code uses a different identifier.
-- Every state machine must be documented with:
-  - purpose and scope
-  - state list
-  - transition diagram
-  - transition table with current state, trigger, guard/condition, action, next state, and timeout/failure behavior
-- Every packet flow must be documented with:
-  - packet purpose
-  - sender and receiver
-  - required fields
-  - normal response
-  - timeout rule
-  - error handling
-- Every transport contract must explicitly document ownership of:
-  - liveness counters such as `HostLiveInteger` and `DeviceLiveInteger`
-  - CRC/checksum validation
-  - reconnect behavior
-  - watchdog enforcement
-  - entry to `error`, `reset`, and `initialize`
-- If Eyal edits `.docx` files manually, Codex must review those edits and update the text-based files under `docs/architecture/` so future LLM work remains aligned.
-- If Codex updates the text-based architecture files first, Codex must also update the corresponding `.docx` documents before considering the documentation change complete.
-- Once Eyal establishes manual formatting in a `.docx` document, future `.docx` edits must preserve the existing headings, styles, bullets, numbering, fonts, tables, figure placement, and general layout unless Eyal explicitly asks to change them.
-- After manual formatting exists, do not replace the entire `.docx` as a regeneration strategy for normal documentation updates. Prefer targeted in-place OpenXML edits that preserve the existing presentation layer.
-- Limit PowerShell command payloads to at most 7000 characters. If a change would require a longer command, split it into smaller commands or use repo-local scripts/files so the command fits reliably within host/tooling limits.
-- Approval workflow note for this and future project repos:
-  - prefer persistent approvals for narrowly scoped, reusable command prefixes instead of one-off approvals for whole commands
-  - good approval scope includes common local workflows such as repo-local Python launches, repo-local PowerShell helper scripts, health checks, tests, build commands, flash commands, and browser opens
-  - do not rely on blanket approval for all Python or all PowerShell commands; approvals should stay specific enough to remain safe and auditable
-- Repository version is tracked in root `VERSION` with format `X.Y.Z`.
-- Firmware bridge version is tracked in `firmware/esp32c3_bridge/VERSION` with the same `X.Y.Z` format.
-- `X`: major functionality/refactoring changes.
-- `Y`: minor bug-fix and incremental functionality changes.
-- `Z`: sub-version increment for accepted successful local verification cycles.
-- Application and firmware versions form one repository version tree and must stay aligned with the relevant docs, splash metadata, and firmware-source comments.
-- After a successful local verification cycle, Codex must ask whether to commit current changes and bump `Z`.
-- After a successful client build+flash or simulator verification cycle that is meant to be exercised through the simulator UI, Codex must automatically run the simulator UI and ask Eyal whether it loaded successfully.
-- Every version bump and every project revision must add a new entry to docs/REVISION_HISTORY.doc.
-- Each REVISION_HISTORY entry must include:
-  - the version/revision number
-  - the firmware version that applies to that release entry under the current application-version branch
-  - the date
-  - the time in `HH:MM:SS` format
-  - a brief description of what changed relative to the previous revision
-- Maintain `docs/REVISION_HISTORY.doc` with sections grouped by `X.Y`, a short change summary per entry, and a continuously maintained latest-version feature list.
-- Before informing Eyal to run a build, review the VS Code `PROBLEMS` panel and resolve all reported issues.
-- After every code change, Codex must perform local update/verification itself before reporting ready:
-  - refresh project metadata (`reconfigure` / `compile_commands.json`)
-  - run a local build
-  - fix all detected issues before asking Eyal to build
-- Every function declaration and definition must have a short header comment block with `@brief`, `@details`, parameters, and return value where applicable.
-- Every maintained script file must start with a file-level documentation block that explains:
-  - the script purpose
-  - what it changes or launches
-  - the important parameters
-  - the expected outputs or side effects
-- Comment best practices for this repository:
-  - prefer comments that explain intent, constraints, ownership, or non-obvious behavior
-  - do not add comments that merely restate the next line of code
-  - keep comments synchronized with the current implementation whenever code changes
-  - use exact code-facing names in comments and documentation
-  - for inline comments, document why the code is structured a certain way or what failure mode is being prevented
-- Inline code/documentation practices for this repository:
-  - keep inline comments short and place them only where the code is not self-evident
-  - document fallbacks, host-specific workarounds, process-lifetime assumptions, and generated-file constraints where they occur
-  - prefer one clear comment before a tricky block over many low-value end-of-line comments
-  - if a helper script wraps another tool or script, document the handoff boundary and the reason that wrapper exists
-- Every `README.md` change must be committed immediately.
-- Repositories must not share tracked files. If another repository needs the same asset, script, or document, duplicate it into that repository and maintain the copies separately.
-- When a successful local verification cycle completes, play the project celebration sound from `sounds\build-success-monkey-1p5x.wav`.
-- After the success sound for a successful local verification/build cycle, Codex must automatically start the simulator application from the repository virtual environment first, confirm that the backend is actually running, and only then open the simulator web UI.
-- Every simulator application launch during Eyal's testing must run with event and logger monitoring enabled so the UI and backend collect actionable runtime data while Eyal exercises the system.
-- Backend launch best practice for this Python + `uvicorn` simulator:
-  - use a deterministic repo-local launcher script or service wrapper
-  - prefer the repository virtual environment interpreter before a global Python installation
-  - inspect the current port owner before termination; do not kill unrelated listeners just because they occupy the target port
-  - prefer graceful shutdown before forced termination when replacing an existing simulator listener
-  - capture stdout and stderr to logs or keep them visible in the supervising console
-  - require a concrete readiness signal such as `GET /health`
-  - supervise the process with a stable host if it must outlive the initiating shell
-  - separate application correctness from editor, sandbox, or task-runner lifetime
-- For this project, the startup order is mandatory:
-  - from now on, launch the simulator the same way a standard user would: start from `scripts\run_simulator.bat` unless a lower-level script is being edited or debugged directly
-  - `scripts\run_simulator.bat` shall open one temporary PowerShell session for the manual-launch flow, then close that session after backend readiness and the browser prompt complete
-  - `scripts\launch_simulator_ui.ps1` shall run installation verification inside that same launcher host, then start the backend and ask whether to open the UI in a fresh browser session
-  - if installation verification finds any missing component or version mismatch, show a popup with the gaps and stop instead of continuing to startup
-  - launch the repository `.venv`-backed Python application through the deterministic repo-local launcher `scripts\run_simulator.ps1`
-  - let the launcher resolve `.\.venv\Scripts\python.exe` and run `uvicorn server.app:app --host 127.0.0.1 --port 8000` from the repository root
-  - if the target port is already listening, inspect the owning process and only replace it when it can be positively identified as this simulator backend
-  - when replacing an old simulator listener, attempt graceful termination first and force-stop only as fallback
-  - the manual launcher shall start the backend as a Python process directly rather than opening another PowerShell host for backend execution
-  - preserve backend stdout and stderr visibility or redirect them into repo-local logs for diagnosis
-  - verify successful startup with a concrete runtime signal such as a healthy process plus a successful `/health` response
-  - before opening the browser, clear or bypass cached page state so the browser loads the latest simulator UI instead of stale frontend assets
-  - only after that open the browser/UI
-  - do not open the browser optimistically before backend startup is confirmed
-- When waiting for Eyal to do anything required to continue, including replying to a prompt, answering a question, approving a request, or simply not sending a new instruction while Codex is otherwise idle, play the project wait sound from `sounds\WaitSound.wav`.
-- For any such waiting state, play `sounds\WaitSound.wav` once immediately when the wait begins, then if 3 minutes pass without a response from Eyal, play it again and keep repeating it every additional 3 minutes until a response arrives or the task resumes.
-- Wait-sound playback is a best-effort local notification only. Codex can verify that the helper scripts start and stop successfully, but cannot verify that Eyal actually heard audio on the active output device.
-- Session hook for the wait sound:
-  - immediately before sending an explicit chat prompt or question that requires Eyal to respond in the conversation, run `scripts\start_wait_sound.ps1`
-  - immediately after Eyal responds, run `scripts\stop_wait_sound.ps1`
-  - do not rely on the wait sound for hidden tool-approval popups, internal sandbox approval flows, or other non-chat waits because Eyal may not hear or notice those cases
-- Important inconsistencies, mismatches, or stale notes discovered during work must be explicitly pointed out before they are forgotten.
-- For every instruction from Eyal, Codex must read the full text carefully, derive the complete set of concrete tasks implied by that instruction, execute all of them, and verify before responding that every identified task was actually followed up and finished.
-- UI spacing rule: keep at least `10` pixels of spacing between menus, buttons, and adjacent interactive controls unless a specific screen explicitly requires otherwise.
-- Editable text rule: all editable text controls in the simulator UI must use a bright color box with a light visible frame so writable fields are immediately distinguishable from static text boxes.
-- Simulator UI interaction rule:
-  - command buttons use blue as the default unpressed color
-  - when a command button is pressed it must turn gray and look pressed while the related state/action is still in progress
-  - when that state/action finishes, the button returns to the default blue unpressed appearance
-  - machine-state indication colors are:
-    - dark blue = inactive / default after reset
-    - blinking green = in progress
-    - red = finished with failure
-    - light green = finished with success
-- This simulator is intended to own exactly one serial port endpoint at a time. Do not design the runtime so multiple processes compete for the same COM device.
-- For USB serial integration, one background serial manager shall own the COM port and the FastAPI routes shall communicate with that manager instead of opening the port directly from request handlers.
-- After any firmware `flash`, ESP-IDF `monitor`, or raw serial-capture workflow on a COM port, Codex must close all attached monitor/capture/helper processes and verify that no stale PID remains attached to that COM port before reopening it through the simulator runtime.
+## Verified Architecture
 
-### Codex and VS Code `PROBLEMS` (Session Rule)
+The active runtime path in code is:
 
-- Codex currently cannot directly read the live VS Code `PROBLEMS` UI panel state by itself in-session.
-- Therefore, Codex must use task/build output plus problem matchers as the machine-readable source of diagnostics.
-- Required workflow for every coding session:
-  - Run the local simulator build/verification commands.
-  - Verify zero active problems from task output and fix all issues before saying build-ready.
-  - If UI-only diagnostics still appear, Eyal should paste the `PROBLEMS` entries and Codex must resolve them before proceeding.
-- VS Code tasks should reveal problems on build failure and use problem matchers so diagnostics remain machine-readable.
+1. `server/app.py`
+   FastAPI entry point. It exposes `/health`, `/api/app-info`, mounts the API router, and serves `server/ui/index.html`.
+2. `server/api/routes.py`
+   HTTP API surface for transport configuration, COM-port ownership, reset/initialize/keepalive/send-data actions, and link snapshots.
+3. `server/sim/link_state_machine.py`
+   The active simulator runtime. It owns the low-level workflow, mirrored counters, watchdog logic, transition logging, and the state snapshot returned to the UI.
+4. `server/transport/serial_link.py`
+   Single-owner serial manager. It opens/closes the COM port, runs the background RX loop, frames traffic, keeps transport counters, and can force-release likely external COM-port holders.
+5. `ServerInterface/frame_codec.py`
+   Shared frame codec used by the Python runtime. This is the protocol authority for frame encoding/decoding on the host side.
+6. `firmware/esp32c3_bridge/main/bridge_main.c`
+   Optional bridge firmware. It accepts framed commands from the host over USB serial and exposes the Wi-Fi AP / TCP listener used by the ESP32-S3 client.
 
-## Recommended Architecture Baseline
+## Important Architecture Clarification
 
-- Runtime stack:
-  - Python
-  - FastAPI
-  - pyserial
-  - uvicorn
-- Suggested module split:
-  - `server/api`: REST and websocket endpoints
-  - `server/transport`: serial port ownership and framing
-  - `server/sim`: controller state machine and protocol behavior
-  - `tests`: protocol and API tests
+`server/sim/controller_state.py` appears to be an older or alternate simulation path and is not the active transport runtime used by `server/app.py`. The live API imports `link_runtime` from `server/sim/link_state_machine.py`, so that file is the current source of truth for the running server architecture.
 
-## Expected Repository Files
+## End-to-End Topology
 
-- `README.md`: workflow and session handoff
-- `AGENTS.md`: repo-specific Codex rules
-- `VERSION`: canonical project version
-- `firmware/esp32c3_bridge/VERSION`: canonical ESP32-C3 bridge firmware version
-- `docs/EyalEspressoServerSimulatorRequirements and Design.docx`: requirements and design document
-- `docs/EyalEspressoServerSimulatorDetailedDesign.docx`: detailed design document
-- `docs/REVISION_HISTORY.doc`: revision history and latest feature list
-- `docs/VERSIONING.md`: versioning policy
-- `scripts/generate_requirements_docx.ps1`: requirements document generator
-- `scripts/generate_detailed_design_docx.ps1`: detailed design generator
-- `scripts/verify_simulator_installation.ps1`: preflight runtime-version verifier for the manual launcher
-- `scripts/launch_simulator_ui.ps1`: single-host manual-launch helper that verifies installation, starts the backend, and prompts to open a fresh browser session
-- `scripts/run_simulator.bat`: Windows batch wrapper that opens the one visible PowerShell host for the standard-user simulator launch path
-- When creating or updating `.docx` files programmatically, use an extract/edit/repack flow for the OpenXML container (`.docx` is a ZIP package) instead of in-place ZIP entry replacement on this host.
-- Programmatic `.docx` generation must write valid OpenXML package entry names with forward slashes such as `_rels/.rels` and `word/document.xml`, and must emit valid XML text without doubled quote escaping inside the stored XML files.
-- `scripts/play_wait_sound.ps1`: one-shot WAV playback helper
-- `scripts/start_wait_sound.ps1`: immediate and repeating wait-sound worker starter
-- `scripts/stop_wait_sound.ps1`: wait-sound worker stop helper
-- `sounds/build-success-monkey-1p5x.wav`: local build-success sound asset
-- `sounds/WaitSound.wav`: local runtime wait-sound asset
+The current system is structured like this:
 
-## Initial Development Notes
+1. Browser UI talks to FastAPI over HTTP.
+2. FastAPI routes call the in-process simulator runtime.
+3. The simulator runtime talks to the serial manager.
+4. The serial manager talks over one COM port to the ESP32-C3 bridge.
+5. The ESP32-C3 bridge exposes Wi-Fi AP `EyalSimulatorAP` and TCP port `3333`.
+6. The ESP32-S3 client joins that AP and connects to the bridge over TCP using the framed transport.
 
-- The current client project uses `COM9` for flashing and runtime interaction. The simulator must not try to own the same physical port at the same time as flashing or client-side serial tools.
-- If both sides need to run on one PC simultaneously, use a virtual COM pair or a separate serial bridge path.
+This means the Python process does not directly own the Wi-Fi/TCP listener used by the client. The bridge firmware owns that low-level endpoint.
+
+## Transport Model
+
+The simulator mirrors the client’s framed protocol and low-level states.
+
+- Shared frame codec with CRC16-CCITT
+- Shared start-of-frame bytes: `0xA5 0x5A`
+- Shared message family: `RESET`, `INITIALIZE`, `CONNECT`, `DISCONNECT`, `KEEPALIVE`, `ERROR`, `ACK`, `DATA`
+- Mirrored counters:
+  - server live integer
+  - client live integer
+  - sequence
+- Main runtime states:
+  - `reset`
+  - `initialize`
+  - `connect`
+  - `keepalive`
+  - `wait_for_com_reset`
+
+The simulator keeps transport logs and returns snapshot-shaped data to the UI instead of exposing mutable runtime internals directly.
+
+## API Surface
+
+Key routes currently implemented in `server/api/routes.py`:
+
+- `GET /health`
+- `GET /api/app-info`
+- `GET /api/link`
+- `POST /api/config`
+- `POST /api/transport/open`
+- `POST /api/transport/close`
+- `POST /api/transport/release-com`
+- `POST /api/transport/toggle-wifi`
+- `POST /api/command/reset`
+- `POST /api/command/initialize`
+- `POST /api/command/keepalive`
+- `POST /api/command/send-data`
+
+## Repository Layout
+
+- `server/`: FastAPI app, API routes, runtime state machines, and transport code
+- `server/ui/`: browser UI assets
+- `ServerInterface/`: shared protocol/codec implementation
+- `firmware/esp32c3_bridge/`: ESP-IDF bridge firmware
+- `tests/`: simulator API tests
+- `docs/`: requirements, revision history, and transport architecture docs
+- `scripts/`: launch, verification, sound, and documentation helpers
+- `VERSION`: simulator app version
+- `firmware/esp32c3_bridge/VERSION`: bridge firmware version
+
+## Run
+
+Install dependencies first:
+
+```bash
+pip install -r requirements.txt
+```
+
+Then run the backend with your preferred launcher. The repository already includes Windows helpers such as:
+
+- `scripts/run_simulator.bat`
+- `scripts/run_simulator.ps1`
+- `scripts/launch_simulator_ui.ps1`
+
+## Current Architectural Intent
+
+The server simulator is transport-first, not yet a full espresso-machine domain simulator. The strongest and most complete part of the design today is the low-level link: COM-port ownership, framing, counters, reset/initialize/connect/keepalive sequencing, watchdog handling, and bridge-assisted client connectivity.
+
+Higher-level machine behavior exists mainly as scaffolding compared with the transport layer.
