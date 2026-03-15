@@ -116,3 +116,10 @@ The server simulator is transport-first, not yet a full espresso-machine domain 
 Higher-level machine behavior exists mainly as scaffolding compared with the transport layer.
 
 All git commits for this repository should be performed directly with real git access, not through the sandboxed environment.
+
+Reference direct-commit method used here:
+
+```bash
+git add README.md
+git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
+```
