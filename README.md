@@ -123,3 +123,5 @@ Reference direct-commit method used here:
 git add README.md
 git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
 ```
+
+Codex has permission to run any `.exe` file it chooses, as long as that executable only creates or modifies files within `C:\Espressif`.
