@@ -114,3 +114,5 @@ Then run the backend with your preferred launcher. The repository already includ
 The server simulator is transport-first, not yet a full espresso-machine domain simulator. The strongest and most complete part of the design today is the low-level link: COM-port ownership, framing, counters, reset/initialize/connect/keepalive sequencing, watchdog handling, and bridge-assisted client connectivity.
 
 Higher-level machine behavior exists mainly as scaffolding compared with the transport layer.
+
+All git commits for this repository should be performed directly with real git access, not through the sandboxed environment.
