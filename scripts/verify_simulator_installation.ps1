@@ -3,23 +3,15 @@
 Verifies that the local simulator runtime matches the development baseline.
 
 .DESCRIPTION
-Checks the repository-local Python interpreter and required runtime package
-versions before the manual batch launcher tries to start any backend or UI
-logic. If a required component is missing or the version differs from the
-development baseline, the script shows a popup listing the gaps and exits with a
-non-zero status.
+Runs requirements synchronization with the repository-local Python environment
+before startup. On failure, the script reports actionable gaps and pip output.
 #>
 [CmdletBinding()]
 param()
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PythonExe = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
-$ExpectedPythonVersion = '3.13.3'
-$ExpectedPackageVersions = [ordered]@{
-    fastapi = '0.135.1'
-    uvicorn = '0.41.0'
-    pyserial = '3.5'
-}
+$RequirementsFile = Join-Path $ProjectRoot 'requirements.txt'
 
 # @brief Show a blocking Windows message box with the detected installation gaps.
 # @details Uses Windows Forms so the launcher can explain local environment
@@ -35,11 +27,11 @@ function Show-GapMessage {
     $message = @(
         'Simulator installation verification failed.'
         ''
-        'The following gaps or version mismatches were detected:'
+        'The following gaps were detected:'
         ''
     ) + $Gaps + @(
         ''
-        'Install or align these components, then run the launcher again.'
+        'Fix these gaps and run the launcher again.'
     )
 
     [void][System.Windows.Forms.MessageBox]::Show(
@@ -50,70 +42,101 @@ function Show-GapMessage {
     )
 }
 
-# @brief Return all installation gaps relative to the simulator baseline.
-# @details Checks the repository-local interpreter and required package
-# versions and returns a list of mismatches without showing UI by itself.
+# @brief Synchronize Python requirements and parse missing-package failures.
+# @details Runs `pip install -r requirements.txt` with the repository-local
+# interpreter, captures pip output, and extracts package names from common
+# "could not find distribution" error lines.
+# @return Hashtable with Success, MissingPackages, Output, PipExitCode, and
+# RequirementsFile.
+function Invoke-SimulatorRequirementsSync {
+    $result = @{
+        Success = $false
+        MissingPackages = @()
+        Output = @()
+        PipExitCode = $null
+        RequirementsFile = $RequirementsFile
+    }
+
+    if (-not (Test-Path $PythonExe)) {
+        $result.Output = @("Missing repository-local Python interpreter: $PythonExe")
+        return $result
+    }
+
+    if (-not (Test-Path $RequirementsFile)) {
+        $result.Output = @("Missing requirements file: $RequirementsFile")
+        return $result
+    }
+
+    $pipOutput = @(& $PythonExe -m pip install -r $RequirementsFile --disable-pip-version-check 2>&1)
+    $pipSucceeded = $?
+    $pipExitCode = $LASTEXITCODE
+    if ($null -eq $pipExitCode) {
+        $pipExitCode = 0
+    }
+
+    $missingPackages = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $pipOutput) {
+        if ($line -match 'Could not find a version that satisfies the requirement\s+(?<name>[^\s;]+)') {
+            $missingPackages.Add($matches.name)
+            continue
+        }
+
+        if ($line -match 'No matching distribution found for\s+(?<name>[^\s;]+)') {
+            $missingPackages.Add($matches.name)
+            continue
+        }
+    }
+
+    $result.Success = ($pipSucceeded -and ($pipExitCode -eq 0))
+    $result.MissingPackages = @($missingPackages | Select-Object -Unique)
+    $result.Output = $pipOutput
+    $result.PipExitCode = $pipExitCode
+    return $result
+}
+
+# @brief Return static installation gaps that do not depend on Python stdout parsing.
+# @details Checks only stable prerequisites so verification remains reliable in
+# shell-host combinations where native child stdout may be unavailable.
 # @return List of human-readable gap descriptions.
 function Get-SimulatorInstallationGaps {
     $gaps = New-Object System.Collections.Generic.List[string]
 
     if (-not (Test-Path $PythonExe)) {
         $gaps.Add("Missing repository-local Python interpreter: $PythonExe")
-        return $gaps.ToArray()
     }
 
-    $pythonVersionOutput = & $PythonExe --version 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $gaps.Add("Failed to query Python version from $PythonExe")
-    } else {
-        $actualPythonVersion = ($pythonVersionOutput -replace '^Python\s+', '').Trim()
-        if ($actualPythonVersion -ne $ExpectedPythonVersion) {
-            $gaps.Add("Python version mismatch. Expected $ExpectedPythonVersion, found $actualPythonVersion.")
-        }
-    }
-
-    $packageCheckScript = @'
-from importlib import metadata
-packages = ["fastapi", "uvicorn", "pyserial"]
-for name in packages:
-    try:
-        print("{}={}".format(name, metadata.version(name)))
-    except metadata.PackageNotFoundError:
-        print("{}=MISSING".format(name))
-'@
-
-    # Feed the probe script over stdin because PowerShell can mangle quotes in
-    # inline `python -c` payloads on some Windows hosts.
-    $packageLines = @($packageCheckScript | & $PythonExe - 2>$null)
-    $packageVersions = @{}
-    foreach ($packageLine in $packageLines) {
-        if ($packageLine -match '^(?<name>[^=]+)=(?<version>.+)$') {
-            $packageVersions[$matches.name] = $matches.version
-        }
-    }
-
-    foreach ($packageName in $ExpectedPackageVersions.Keys) {
-        $expectedVersion = $ExpectedPackageVersions[$packageName]
-        $actualVersion = $packageVersions[$packageName]
-        if (-not $actualVersion) {
-            $gaps.Add("Package check did not return a version for $packageName.")
-            continue
-        }
-
-        if ($actualVersion -eq 'MISSING') {
-            $gaps.Add("Missing Python package: $packageName==$expectedVersion")
-            continue
-        }
-
-        if ($actualVersion -ne $expectedVersion) {
-            $gaps.Add("Package version mismatch for $packageName. Expected $expectedVersion, found $actualVersion.")
-        }
+    if (-not (Test-Path $RequirementsFile)) {
+        $gaps.Add("Missing requirements file: $RequirementsFile")
     }
 
     return $gaps.ToArray()
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+    $requirementsSync = Invoke-SimulatorRequirementsSync
+    if (-not $requirementsSync.Success) {
+        $gaps = New-Object System.Collections.Generic.List[string]
+        $gaps.Add("Automatic requirements sync failed: $($requirementsSync.RequirementsFile)")
+        $gaps.Add("pip exit code: $($requirementsSync.PipExitCode)")
+
+        if ($requirementsSync.MissingPackages.Count -gt 0) {
+            foreach ($packageName in $requirementsSync.MissingPackages) {
+                $gaps.Add("Missing package from pip resolution: $packageName")
+            }
+        }
+
+        $pipTail = @($requirementsSync.Output | Select-Object -Last 8)
+        if ($pipTail.Count -gt 0) {
+            $gaps.Add('pip output (tail):')
+            foreach ($line in $pipTail) {
+                $gaps.Add("  $line")
+            }
+        }
+
+        Show-GapMessage -Gaps $gaps.ToArray()
+        exit 1
+    }
+
     $gaps = Get-SimulatorInstallationGaps
     if ($gaps.Count -gt 0) {
         Show-GapMessage -Gaps $gaps

@@ -62,7 +62,7 @@ The simulator mirrors the client’s framed protocol and low-level states.
   - `initialize`
   - `connect`
   - `keepalive`
-  - `wait_for_com_reset`
+  - `error`
 
 The simulator keeps transport logs and returns snapshot-shaped data to the UI instead of exposing mutable runtime internals directly.
 
@@ -97,17 +97,55 @@ Key routes currently implemented in `server/api/routes.py`:
 
 ## Run
 
-Install dependencies first:
+You must install dependencies first:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Then run the backend with your preferred launcher. The repository already includes Windows helpers such as:
+You must launch the simulator through `scripts/launch_simulator_ui.ps1`.
 
-- `scripts/run_simulator.bat`
-- `scripts/run_simulator.ps1`
-- `scripts/launch_simulator_ui.ps1`
+## Session Setup And Recovery (Use Every Session)
+
+To avoid repeated missing-package or false-missing popups, use this session startup sequence:
+
+Use this every session:
+
+- Run `launch_simulator_ui.ps1` from the server repo.
+- If it fails, read terminal block first (`Simulator Launch ... Failure`).
+- Keep VS Code interpreter pinned to `C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\.venv\Scripts\python.exe`.
+
+1. Open a terminal in `Eyal_espresso_server_simulator`.
+2. Launch only with:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\launch_simulator_ui.ps1
+```
+
+3. The launcher now always runs requirements sync first (`pip install -r requirements.txt`) before backend startup.
+4. If startup fails, read the terminal block first (`[Simulator Launch Prerequisite Failure]`, `[Simulator Launch Verification Failure]`, or `[Simulator Launch Runtime Failure]`).
+5. The popup mirrors the same failure list for convenience, but the terminal output is the source of truth for copy/paste diagnostics.
+6. In VS Code, keep the interpreter fixed to:
+   `C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\.venv\Scripts\python.exe`
+
+This process is required to prevent repeated two-hour recovery loops caused by mismatched interpreters or stale package environments.
+
+The repository also contains related helper scripts:
+
+- `scripts/run_simulator.bat` (wrapper that calls `scripts/launch_simulator_ui.ps1`)
+- `scripts/run_simulator.ps1` (backend-only launcher without the UI-open prompt flow)
+
+### Bridge Firmware Build and Flash
+
+You must build and flash bridge firmware through `cmd.exe` with an absolute forward-slash path.
+
+```bash
+cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd build
+cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> flash
+```
+
+You must run build and flash sequentially, with `build` first and `flash` second.
+For Codex/WSL sessions, this absolute-path `cmd.exe` method is the required build and flash path.
 
 ## Current Architectural Intent
 
@@ -115,13 +153,33 @@ The server simulator is transport-first, not yet a full espresso-machine domain 
 
 Higher-level machine behavior exists mainly as scaffolding compared with the transport layer.
 
-All git commits for this repository should be performed directly with real git access, not through the sandboxed environment.
+You must use the sound-related scripts in `scripts/` as workflow notifications for verification/build/flash outcomes.
+You must perform all git commits for this repository directly with real git access, not through the sandboxed environment.
 
-Reference direct-commit method used here:
+You must use this direct-commit method as the reference:
 
 ```bash
 git add README.md
 git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
 ```
 
-Codex has permission to run any `.exe` file it chooses, as long as that executable only creates or modifies files within `C:\Espressif`.
+## Workspace Review Rules
+
+- You must read all files in the two workspace projects: `Eyal_espresso_client` and `Eyal_espresso_server_simulator`.
+- You must review both project architectures and be prepared to make code changes.
+- You must read both `README.md` files and follow the rules listed in them.
+- You must verify that git is active before making or finalizing changes.
+
+## Session Start Approval Bootstrap
+
+- At the beginning of every new Codex session, before substantial work, Codex must run a pre-approval bootstrap and request saved prefix approvals for common commands.
+- Codex must ask for these prefix types first so future commands do not repeatedly prompt:
+  - `code --reuse-window --goto <WindowsPath:line:col>`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\...\scripts\start_wait_sound.ps1`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\...\scripts\stop_wait_sound.ps1`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\...\scripts\play_wait_sound.ps1`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\...\scripts\play_build_success_sound.ps1`
+  - Common build/flash wrappers under `C:\Espressif\...\scripts\` that this workspace uses.
+- During this bootstrap, Codex must explicitly ask the user to save/remember the prefix rule when the runtime approval UI appears.
+
+You must allow Codex to run any `.exe` file it chooses, as long as that executable only creates or modifies files within `C:\Espressif`.
