@@ -2,10 +2,16 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.16\par
-- Summary: Moved simulator transport ownership toward the ESP32-C3 bridge, simplified the operator UI, and aligned the host runtime to monitor bridge-owned connect/keepalive behavior.\par
+- Version: 0.1.17\par
+- Summary: Stabilized bridge/client communication with session/request-correlated keepalive supervision and validated sustained keepalive operation after flash.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-16 14:54:00\b0\par
+- Version: 0.1.17\par
+- Firmware Version: 0.1.17\par
+- Summary: Completed bridge-side keepalive protocol hardening and validated successful communication with the ESP32-S3 client.\par
+- Notes: `firmware/esp32c3_bridge/main/bridge_main.c` now keeps keepalive request ownership fully server-side using `sid` plus `req` metadata, parses TCP frames immediately without wait-window RX blocking, retries the same pending request id on timeout, and avoids counter reseeding during retry attempts. The keepalive period was raised to 300ms to add timing margin while preserving the 0.3-second response deadline and three-attempt retry policy. Verified with successful build, successful flash to `COM4`, simulator launch on `127.0.0.1:8000`, and synchronized monitor sessions showing connect and keepalive progression with the updated protocol contract.\par
+\par
 \b 2026-03-13 19:50:00\b0\par
 - Version: 0.1.16\par
 - Firmware Version: 0.1.16\par
