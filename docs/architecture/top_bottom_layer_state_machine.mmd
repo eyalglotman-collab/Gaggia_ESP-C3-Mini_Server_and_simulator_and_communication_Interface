@@ -1,0 +1,20 @@
+stateDiagram-v2
+    [*] --> TopLayerReset
+    TopLayerReset --> TopLayerInitialize: reset command
+    TopLayerInitialize --> TopLayerConnect: mirrored config accepted
+    TopLayerConnect --> TopLayerKeepAliveServerSend: connect proven and keepalive may start
+    TopLayerKeepAliveServerSend --> TopLayerKeepAliveClientReturn: server keepalive transmitted
+    TopLayerKeepAliveClientReturn --> TopLayerKeepAliveServerSend: valid client return received
+
+    TopLayerConnect --> TopLayerError: TopLayer failures >= 3
+    TopLayerKeepAliveServerSend --> TopLayerError: TopLayer failures >= 3
+    TopLayerKeepAliveClientReturn --> TopLayerError: TopLayer failures >= 3
+    TopLayerError --> TopLayerReset: explicit Reset Communication
+
+    note right of TopLayerConnect
+      BottomLayer auto-retry window:
+      - max 3 retries
+      - checksum failure retry
+      - transport reconnect retry
+      Retry exhaustion escalates into TopLayer failure handling.
+    end note

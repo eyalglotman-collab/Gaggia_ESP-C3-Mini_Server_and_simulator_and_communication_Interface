@@ -80,6 +80,52 @@ class SerialLinkManager:
         self._last_error = error
         self._log(message if not error else f"{message} ({error})")
 
+    @staticmethod
+    def _try_parse_u32_payload_value(payload_text: str, key_text: str) -> int | None:
+        """@brief Parse one unsigned integer key from a semicolon payload.
+
+        @details KEEPALIVE payloads include `sid` and `req` metadata. The
+        parser keeps serial-layer logging self-contained so operators can
+        diagnose stale and duplicate frames without cross-referencing code.
+        """
+
+        key_prefix = f"{key_text}="
+        for token in payload_text.split(";"):
+            token = token.strip()
+            if not token.startswith(key_prefix):
+                continue
+            raw_value = token[len(key_prefix):].strip()
+            if raw_value.isdigit():
+                return int(raw_value)
+        return None
+
+    def _format_keepalive_metadata(self, frame: Frame) -> str:
+        """@brief Build KEEPALIVE direction and correlation metadata text.
+
+        @details The bridge sends `ka_req` and the client replies with
+        `ka_resp`. Surfacing this at RX time removes ambiguity when sequence
+        numbers appear close together in the monitor.
+        """
+
+        payload_text = frame.payload.decode("utf-8", errors="ignore").strip().lower()
+        direction = "UNKNOWN"
+        if payload_text.startswith("ka_req"):
+            direction = "REQ"
+        elif payload_text.startswith("ka_resp"):
+            direction = "RESP"
+        elif payload_text.startswith("keepalive"):
+            direction = "LEGACY"
+
+        sid = self._try_parse_u32_payload_value(payload_text, "sid")
+        req = self._try_parse_u32_payload_value(payload_text, "req")
+
+        metadata = f" dir={direction}"
+        if sid is not None:
+            metadata += f" sid={sid}"
+        if req is not None:
+            metadata += f" req={req}"
+        return metadata
+
     def _detach_serial_locked(self, message: str, error: str = "") -> Any | None:
         """@brief Drop the current serial handle after an unrecoverable port fault.
 
@@ -339,7 +385,13 @@ class SerialLinkManager:
                 for frame in frames:
                     self._rx_frames.append(frame)
                     self._rx_frames_count += 1
-                    self._set_event(f"RX {frame.message_type.name} seq={frame.sequence} device={frame.device_live_integer} bytes={len(frame.payload)}")
+                    keepalive_metadata = ""
+                    if frame.message_type.name == "KEEPALIVE":
+                        keepalive_metadata = self._format_keepalive_metadata(frame)
+                    self._set_event(
+                        f"RX {frame.message_type.name} seq={frame.sequence}{keepalive_metadata} "
+                        f"server={frame.host_live_integer} device={frame.device_live_integer} bytes={len(frame.payload)}"
+                    )
 
     def _snapshot_locked(self) -> SerialLinkSnapshot:
         return SerialLinkSnapshot(

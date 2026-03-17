@@ -13,7 +13,10 @@ from server.transport.frame_codec import Frame, MessageType
 from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
 
 WATCHDOG_MS = 100
-WATCHDOG_GRACE_MS = 350
+WATCHDOG_GRACE_MS = 400
+RUNNING_INTEGER_TIMEOUT_MS = 400
+BOTTOM_LAYER_RETRY_LIMIT = 3
+TOP_LAYER_FAILURE_LIMIT = 3
 CONNECT_SUCCESS_PAYLOADS = {"client_connected", "connect_success", "tcp_connected"}
 
 
@@ -21,8 +24,21 @@ class LinkState(StrEnum):
     RESET = "reset"
     INITIALIZE = "initialize"
     CONNECT = "connect"
-    KEEPALIVE = "keepalive"
-    WAIT_FOR_COM_RESET = "wait_for_com_reset"
+    KEEPALIVE_SERVER_SEND = "keepalive_server_send"
+    KEEPALIVE_CLIENT_RETURN = "keepalive_client_return"
+    DISCONNECT = "disconnect"
+    ERROR = "error"
+
+
+STATE_DISPLAY_NAMES = {
+    LinkState.RESET: "Reset",
+    LinkState.INITIALIZE: "Initialize",
+    LinkState.CONNECT: "Connect",
+    LinkState.KEEPALIVE_SERVER_SEND: "KeepAliveServerSend",
+    LinkState.KEEPALIVE_CLIENT_RETURN: "KeepAliveClientReturn",
+    LinkState.DISCONNECT: "Disconnect",
+    LinkState.ERROR: "Error",
+}
 
 
 @dataclass(slots=True)
@@ -43,6 +59,8 @@ class TransportConfig:
     wifi_connect_timeout_ms: int = 10000
     tcp_connect_timeout_ms: int = 3000
     keepalive_period_ms: int = WATCHDOG_MS
+    bottom_layer_retry_limit: int = BOTTOM_LAYER_RETRY_LIMIT
+    top_layer_failure_limit: int = TOP_LAYER_FAILURE_LIMIT
 
 
 @dataclass(slots=True)
@@ -57,11 +75,20 @@ class LinkSnapshot:
     server_live_integer: int
     client_live_integer: int
     consecutive_keepalive_failures: int
+    bottom_layer_retry_count: int
+    top_layer_failure_count: int
+    top_layer_connect_streak: int
+    bottom_layer_checksum_error_count: int
+    bottom_layer_sequence_error_count: int
     sequence: int
+    transport_last_delay_ms: int
+    transport_max_delay_ms: int
+    total_error_count: int
     last_error: str
     important_data: dict[str, str]
     transport: dict[str, object]
     logs: list[str]
+    low_level_logs: list[str]
     available_states: list[str]
 
 
@@ -83,8 +110,21 @@ class LinkRuntime:
         self._client_live_integer = 0
         self._connection_fault = False
         self._consecutive_keepalive_failures = 0
+        self._bottom_layer_retry_count = 0
+        self._top_layer_failure_count = 0
+        self._top_layer_connect_streak = 0
+        self._bottom_layer_checksum_error_count = 0
+        self._bottom_layer_sequence_error_count = 0
+        self._last_peer_sequence: int | None = None
         self._sequence = 0
+        self._transport_last_delay_ms = 0
+        self._transport_max_delay_ms = 0
+        self._total_error_count = 0
+        self._firmware_error_telemetry_seen = False
+        self._firmware_delay_telemetry_missing_warned = False
         self._watchdog_armed = False
+        self._running_integer_seeded = False
+        self._last_running_integer_rx_at: datetime | None = None
         self._pending_auto_stage: LinkState | None = None
         self._last_error = ""
         self._last_monitor_event = "Simulator monitor ready."
@@ -98,7 +138,7 @@ class LinkRuntime:
         self._initialize_completed = False
         self._connect_completed = False
         self._last_received_client_text = "No client text received yet."
-        self._append_log("Transport runtime ready. Default state is reset.")
+        self._append_log("Transport runtime ready. Default TopLayer state is reset.")
 
     def _timestamp(self) -> str:
         now = datetime.now(UTC)
@@ -106,6 +146,16 @@ class LinkRuntime:
 
     def _append_log(self, message: str) -> None:
         self._logs.appendleft(f"[{self._timestamp()}] {message}")
+
+    def _state_display_name(self, state: LinkState) -> str:
+        """@brief Convert one runtime enum into the canonical ESP32-C label.
+
+        @details The bridge firmware logs state names in PascalCase (for
+        example `InterimDebug`). The simulator UI reuses this helper so all
+        state indicators match the firmware naming exactly.
+        """
+
+        return STATE_DISPLAY_NAMES.get(state, state.value)
 
     def _combined_logs_locked(self) -> list[str]:
         """@brief Return the UI logger feed in newest-to-oldest order.
@@ -136,6 +186,10 @@ class LinkRuntime:
         self._initialize_completed = False
         self._connect_completed = False
         self._pending_auto_stage = None
+        self._top_layer_connect_streak = 0
+        self._last_peer_sequence = None
+        self._running_integer_seeded = False
+        self._last_running_integer_rx_at = None
         self._last_received_client_text = "No client text received yet."
 
     def _clear_connection_fault_locked(self) -> None:
@@ -148,49 +202,99 @@ class LinkRuntime:
 
         self._connection_fault = False
         self._consecutive_keepalive_failures = 0
+        self._top_layer_failure_count = 0
 
-    def _set_runtime_fault_locked(self, message: str) -> None:
-        """@brief Latch a blocking connection fault and wait for explicit reset.
+    def _record_total_error_locked(self, reason_text: str) -> None:
+        """@brief Increment the aggregate telemetry counter for any error event.
 
-        @details Runtime faults that the operator must inspect drive the
-        simulator into `wait_for_com_reset` instead of an `error` state so the
-        server lifecycle matches the current client transport design.
+        @details The total error counter intentionally includes both low-level
+        retry errors and high-level protocol failures so operators can monitor
+        overall communication instability from a single number. Once firmware
+        telemetry is available, the simulator defers to the ESP32-C3-provided
+        total error counter and stops host-side increments.
         """
+
+        del reason_text
+        if self._firmware_error_telemetry_seen:
+            return
+        self._total_error_count += 1
+
+    def _ingest_firmware_telemetry_from_payload_locked(self, payload_text: str) -> None:
+        """@brief Update simulator telemetry from ESP32-C3 payload metadata.
+
+        @details The bridge embeds firmware-owned telemetry inside KEEPALIVE
+        payload text (`td_last_ms`, `td_max_ms`, `terr`). When those fields are
+        present, they become the authoritative values displayed in the UI.
+        """
+
+        delay_last = self._try_parse_i32_payload_value(payload_text, "td_last_ms")
+        delay_max = self._try_parse_u32_payload_value(payload_text, "td_max_ms")
+        total_errors = self._try_parse_u32_payload_value(payload_text, "terr")
+
+        if delay_last is not None:
+            self._transport_last_delay_ms = delay_last
+        if delay_max is not None:
+            self._transport_max_delay_ms = delay_max
+        if delay_last is None and delay_max is None and payload_text.startswith("ka_"):
+            if not self._firmware_delay_telemetry_missing_warned:
+                self._append_log(
+                    "Controller telemetry missing `td_last_ms`/`td_max_ms`; flash ESP32-C3 bridge firmware to enable controller-level delay values."
+                )
+                self._firmware_delay_telemetry_missing_warned = True
+        elif delay_last is not None or delay_max is not None:
+            self._firmware_delay_telemetry_missing_warned = False
+        if total_errors is not None:
+            self._total_error_count = total_errors
+            self._firmware_error_telemetry_seen = True
+
+    def _set_runtime_fault_locked(self, message: str, *, count_total_error: bool = True) -> None:
+        """@brief Latch a blocking TopLayer fault and require explicit reset."""
+
+        if count_total_error:
+            self._record_total_error_locked(message)
 
         self._clear_runtime_flow_locked()
         self._tcp_connected = False
         self._wifi_connected = False
         self._connection_fault = True
         self._last_error = message
-        self._set_state(LinkState.WAIT_FOR_COM_RESET, "Connection fault latched. Waiting for Reset Communication.", message)
+        self._set_state(LinkState.ERROR, "TopLayer fault latched. Reset is required.", message)
 
-    def _schedule_reconnect_locked(self, message: str, *, keepalive_failure: bool) -> None:
-        """@brief Retry through `connect` or stop in `wait_for_com_reset`.
+    def _record_top_layer_failure_locked(self, message: str) -> None:
+        """@brief Record a TopLayer failure and escalate to error at threshold."""
 
-        @details The simulator retries low-level link loss automatically until
-        five sequential keepalive failures have been observed. After that it
-        latches `ConnectionFault` and waits for an explicit reset action.
-        """
+        self._record_total_error_locked(message)
+        self._top_layer_failure_count += 1
+        self._consecutive_keepalive_failures += 1
+        self._append_log(
+            f"TopLayer failure ({self._top_layer_failure_count}/{TOP_LAYER_FAILURE_LIMIT}): {message}"
+        )
+        if self._top_layer_failure_count >= TOP_LAYER_FAILURE_LIMIT:
+            self._set_runtime_fault_locked(message, count_total_error=False)
+            return
+        self._clear_runtime_flow_locked()
+        self._tcp_connected = False
+        self._wifi_connected = False
+        self._set_state(LinkState.RESET, "TopLayer failure routed to reset before reconnect.", message)
+
+    def _schedule_bottom_layer_retry_locked(self, message: str, *, checksum_failure: bool) -> None:
+        """@brief Retry BottomLayer connectivity and escalate when retries exhaust."""
+
+        self._record_total_error_locked(message)
+        self._bottom_layer_retry_count += 1
+        if checksum_failure:
+            self._bottom_layer_checksum_error_count += 1
+        self._append_log(
+            f"BottomLayer retry ({self._bottom_layer_retry_count}/{BOTTOM_LAYER_RETRY_LIMIT}): {message}"
+        )
+        if self._bottom_layer_retry_count >= BOTTOM_LAYER_RETRY_LIMIT:
+            self._record_top_layer_failure_locked("BottomLayer retries exhausted")
+            return
 
         self._clear_runtime_flow_locked()
         self._tcp_connected = False
         self._wifi_connected = False
-        self._last_error = message
-
-        if keepalive_failure:
-            self._consecutive_keepalive_failures += 1
-            self._append_log(
-                "Keepalive failure recorded "
-                f"({self._consecutive_keepalive_failures}/5): {message}"
-            )
-            if self._consecutive_keepalive_failures >= 5:
-                self._set_runtime_fault_locked(message)
-                return
-        if self._current_state is LinkState.WAIT_FOR_COM_RESET:
-            return
-        self._set_state(LinkState.CONNECT, "Transport retry scheduled through connect.", message)
-        self._wifi_connected = False
-        self._tcp_connected = False
+        self._set_state(LinkState.CONNECT, "BottomLayer retry scheduled through connect.", message)
 
     def _try_send_command_locked(
         self,
@@ -352,6 +456,87 @@ class LinkRuntime:
             return "generic unknown failure"
         return None
 
+    @staticmethod
+    def _try_parse_u32_payload_value(payload_text: str, key_text: str) -> int | None:
+        """@brief Parse one unsigned integer value from a semicolon payload.
+
+        @details KEEPALIVE payloads carry `sid` and `req` correlation metadata.
+        Exposing parsed values in logs keeps request/response tracing explicit.
+        """
+
+        key_prefix = f"{key_text}="
+        for token in payload_text.split(";"):
+            token = token.strip()
+            if not token.startswith(key_prefix):
+                continue
+            raw_value = token[len(key_prefix):].strip()
+            if raw_value.isdigit():
+                return int(raw_value)
+        return None
+
+    @staticmethod
+    def _try_parse_i32_payload_value(payload_text: str, key_text: str) -> int | None:
+        """@brief Parse one signed integer value from a semicolon payload.
+
+        @details Delay telemetry uses `-1` to indicate "not in keepalive
+        sequence" while positive values remain measured latencies.
+        """
+
+        key_prefix = f"{key_text}="
+        for token in payload_text.split(";"):
+            token = token.strip()
+            if not token.startswith(key_prefix):
+                continue
+            raw_value = token[len(key_prefix):].strip()
+            if not raw_value:
+                continue
+            sign_trimmed = raw_value[1:] if raw_value.startswith("-") else raw_value
+            if sign_trimmed.isdigit():
+                try:
+                    return int(raw_value)
+                except ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _classify_keepalive_direction(payload_text: str) -> str:
+        """@brief Classify one KEEPALIVE payload as request or response.
+
+        @details The bridge emits `ka_req` while the client returns `ka_resp`.
+        Legacy payloads are labeled explicitly so mixed firmware versions are
+        still diagnosable from one logger view.
+        """
+
+        if payload_text.startswith("ka_req"):
+            return "REQ"
+        if payload_text.startswith("ka_resp"):
+            return "RESP"
+        if payload_text.startswith("keepalive"):
+            return "LEGACY"
+        return "UNKNOWN"
+
+    def _describe_frame_for_log(self, frame: Frame, payload_text: str) -> str:
+        """@brief Build optional per-frame log metadata for UI diagnostics.
+
+        @details KEEPALIVE entries include direction plus `sid`/`req` so stale
+        and duplicate traffic can be identified without cross-referencing raw
+        payload text manually.
+        """
+
+        if frame.message_type is not MessageType.KEEPALIVE:
+            return ""
+
+        direction = self._classify_keepalive_direction(payload_text)
+        sid = self._try_parse_u32_payload_value(payload_text, "sid")
+        req = self._try_parse_u32_payload_value(payload_text, "req")
+
+        details = f" direction={direction}"
+        if sid is not None:
+            details += f" sid={sid}"
+        if req is not None:
+            details += f" req={req}"
+        return details
+
     def _poll_received_frames_locked(self) -> None:
         """@brief Consume received frames and advance the server-side states.
 
@@ -364,76 +549,200 @@ class LinkRuntime:
         if not frames:
             return
 
-        reconnect_scheduled = False
-
         for frame in frames:
-            self._server_live_integer = frame.host_live_integer
-            self._client_live_integer = frame.device_live_integer
+            payload_text = frame.payload.decode("utf-8", errors="ignore").strip().lower()
+            self._ingest_firmware_telemetry_from_payload_locked(payload_text)
+            frame_log_details = self._describe_frame_for_log(frame, payload_text)
             self._append_log(
                 f"Received {frame.message_type.name} seq={frame.sequence} "
-                f"server={frame.host_live_integer} client={frame.device_live_integer}."
+                f"server={frame.host_live_integer} client={frame.device_live_integer}{frame_log_details}."
             )
-            payload_text = frame.payload.decode("utf-8", errors="ignore").strip().lower()
+
+            if (
+                self._current_state in (LinkState.KEEPALIVE_SERVER_SEND, LinkState.KEEPALIVE_CLIENT_RETURN)
+                and self._last_peer_sequence is not None
+                and frame.sequence != ((self._last_peer_sequence + 1) % 65536)
+            ):
+                self._bottom_layer_sequence_error_count += 1
+                self._append_log("TopLayer sequential communication loss detected; monitoring continues.")
+            self._last_peer_sequence = frame.sequence
 
             if frame.message_type == MessageType.ERROR:
-                self._schedule_reconnect_locked(
-                    payload_text or "generic unknown failure",
-                    keepalive_failure=(payload_text == "keepalive_supervision_lost"),
-                )
-                reconnect_scheduled = True
-                break
+                self._record_total_error_locked(payload_text or "bridge_error")
+                if payload_text == "keepalive_retry_exhausted":
+                    self._watchdog_armed = False
+                    self._running_integer_seeded = False
+                    self._last_running_integer_rx_at = None
+                    self._wifi_connected = False
+                    self._tcp_connected = False
+                    self._set_state(
+                        LinkState.INITIALIZE,
+                        "Bridge keepalive retries exhausted. Bridge returned to initialize wait.",
+                    )
+                    continue
+                self._append_log(f"Bridge reported error frame: {payload_text or 'generic unknown failure'}")
+                continue
 
             if frame.message_type in (MessageType.KEEPALIVE, MessageType.DATA):
-                self._watchdog_armed = True
-                self._wifi_connected = True
-                self._tcp_connected = True
-                self._bridge_ready = True
-                self._clear_connection_fault_locked()
-                if self._current_state is LinkState.CONNECT:
-                    self._pending_auto_stage = None
-                    self._connect_completed = True
-                    self._set_state(
-                        LinkState.KEEPALIVE,
-                        "Mirrored bridge keepalive/data traffic confirmed the TCP session. Server state advanced to keepalive.",
-                    )
-                    if frame.message_type == MessageType.DATA:
-                        self._last_received_client_text = (
-                            frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
+                now_utc = datetime.now(UTC)
+                if frame.message_type is MessageType.KEEPALIVE:
+                    keepalive_direction = self._classify_keepalive_direction(payload_text)
+                    if keepalive_direction == "REQ":
+                        if ((frame.host_live_integer & 1) != 0 or
+                            (frame.device_live_integer & 1) == 0 or
+                            (frame.device_live_integer + 1) != frame.host_live_integer):
+                            self._append_log(
+                                "KeepAliveServerSend ignored due to parity/counter mismatch; waiting for timeout retry."
+                            )
+                            continue
+
+                        self._running_integer_seeded = True
+                        self._server_live_integer = frame.host_live_integer
+                        self._client_live_integer = frame.host_live_integer + 1
+                        self._last_running_integer_rx_at = now_utc
+                        self._watchdog_armed = True
+                        self._wifi_connected = True
+                        self._tcp_connected = True
+                        self._bridge_ready = True
+                        self._connect_completed = True
+                        self._clear_connection_fault_locked()
+                        self._bottom_layer_retry_count = 0
+                        self._pending_auto_stage = None
+                        self._set_state(
+                            LinkState.KEEPALIVE_CLIENT_RETURN,
+                            "KeepAliveServerSend observed; waiting for KeepAliveClientReturn.",
                         )
+                        continue
+
+                    if keepalive_direction == "RESP":
+                        if ((frame.host_live_integer & 1) != 0 or
+                            (frame.device_live_integer & 1) == 0 or
+                            frame.host_live_integer != (frame.device_live_integer + 1)):
+                            self._append_log(
+                                "KeepAliveClientReturn ignored due to parity/counter mismatch; bridge timeout handling remains active."
+                            )
+                            continue
+
+                        self._running_integer_seeded = True
+                        self._server_live_integer = frame.host_live_integer
+                        self._client_live_integer = frame.device_live_integer
+                        self._last_running_integer_rx_at = now_utc
+                        self._watchdog_armed = True
+                        self._wifi_connected = True
+                        self._tcp_connected = True
+                        self._bridge_ready = True
+                        self._connect_completed = True
+                        self._clear_connection_fault_locked()
+                        self._bottom_layer_retry_count = 0
+                        self._set_state(
+                            LinkState.KEEPALIVE_SERVER_SEND,
+                            "KeepAliveClientReturn validated; waiting for next KeepAliveServerSend.",
+                        )
+                        continue
+
+                if frame.message_type is MessageType.DATA:
+                    self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
                     continue
 
-            if self._current_state is LinkState.CONNECT and payload_text == "connect_ack":
+            if payload_text == "connect_ack":
                 self._wifi_connected = True
                 self._tcp_connected = False
                 self._bridge_ready = True
-                self._append_log(
-                    "Bridge acknowledged CONNECT, but the runtime is still waiting for explicit client connection success."
+                self._set_state(
+                    LinkState.CONNECT,
+                    "Bridge acknowledged CONNECT and remains in connect wait.",
+                )
+                continue
+
+            if payload_text == "tcp_connected":
+                self._wifi_connected = True
+                self._tcp_connected = True
+                self._bridge_ready = True
+                self._set_state(
+                    LinkState.CONNECT,
+                    "Bridge TCP transport connected. Waiting for client CONNECT frame.",
+                )
+                continue
+
+            if payload_text.startswith("client_connected"):
+                self._pending_auto_stage = None
+                self._connect_completed = True
+                self._watchdog_armed = False
+                self._wifi_connected = True
+                self._tcp_connected = True
+                self._bridge_ready = True
+                self._set_state(
+                    LinkState.CONNECT,
+                    "Bridge acknowledged client CONNECT handshake.",
+                )
+                continue
+
+            if payload_text == "disconnect_ack":
+                self._tcp_connected = False
+                self._watchdog_armed = False
+                self._set_state(
+                    LinkState.DISCONNECT,
+                    "Bridge acknowledged disconnect request.",
+                )
+                continue
+
+            if payload_text == "reset_ack":
+                self._clear_runtime_flow_locked()
+                self._wifi_ready = False
+                self._wifi_connected = False
+                self._tcp_connected = False
+                self._bridge_ready = True
+                self._set_state(
+                    LinkState.RESET,
+                    "Bridge acknowledged reset request.",
+                )
+                continue
+
+            if payload_text == "initialize_ack":
+                self._wifi_ready = True
+                self._wifi_connected = False
+                self._tcp_connected = False
+                self._bridge_ready = True
+                self._initialize_completed = True
+                self._set_state(
+                    LinkState.INITIALIZE,
+                    "Bridge acknowledged initialize request.",
                 )
                 continue
 
             if self._current_state is LinkState.CONNECT and payload_text in CONNECT_SUCCESS_PAYLOADS:
                 self._pending_auto_stage = None
                 self._connect_completed = True
-                # Do not arm keepalive supervision until the first real
-                # keepalive/data exchange occurs. Connect success alone only
-                # proves the session exists, not that keepalive traffic has
-                # already started.
                 self._watchdog_armed = False
                 self._wifi_connected = True
                 self._tcp_connected = True
                 self._bridge_ready = True
-                self._set_state(
-                    LinkState.KEEPALIVE,
-                    "Explicit client connection success received. Server state advanced to keepalive ready.",
+                self._append_log(
+                    "Bridge connect success observed. Waiting for keepalive confirmation."
                 )
                 continue
 
-            if self._current_state is LinkState.KEEPALIVE:
-                if frame.message_type == MessageType.DATA:
-                    self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
+    def _enforce_running_integer_timeout_locked(self) -> None:
+        """@brief Note prolonged wait time in KeepAliveClientReturn.
 
-        if reconnect_scheduled:
-            serial_link_manager.clear_buffers()
+        @details The bridge firmware now owns timeout retries. The simulator
+        monitor records long waits but does not schedule additional retries on
+        its own, avoiding duplicate retry paths.
+        """
+
+        if not self._running_integer_seeded:
+            return
+        if self._current_state is not LinkState.KEEPALIVE_CLIENT_RETURN:
+            return
+        if self._last_running_integer_rx_at is None:
+            return
+        if datetime.now(UTC) - self._last_running_integer_rx_at <= timedelta(milliseconds=RUNNING_INTEGER_TIMEOUT_MS):
+            return
+
+        self._append_log(
+            "Monitor note: KeepAliveClientReturn exceeded timeout window; waiting for bridge retry handling."
+        )
+        self._last_running_integer_rx_at = datetime.now(UTC)
 
     def _send_command_locked(self, message_type: MessageType, payload_text: str = "") -> None:
         frame = Frame(
@@ -579,6 +888,10 @@ class LinkRuntime:
             self._wifi_connected = False
             self._tcp_connected = False
             self._clear_connection_fault_locked()
+            self._bottom_layer_retry_count = 0
+            self._top_layer_failure_count = 0
+            self._top_layer_connect_streak = 0
+            self._last_peer_sequence = None
             self._set_state(LinkState.RESET, "Hard COM release executed. Communication returned to reset idle.")
             detail = ", ".join(str(pid) for pid in released_pids) if released_pids else "none"
             self._append_log(f"Release COM Port terminated external PIDs: {detail}.")
@@ -609,6 +922,10 @@ class LinkRuntime:
             self._tcp_connected = False
             self._bridge_ready = transport_snapshot.port_open
             self._clear_connection_fault_locked()
+            self._bottom_layer_retry_count = 0
+            self._top_layer_failure_count = 0
+            self._top_layer_connect_streak = 0
+            self._last_peer_sequence = None
             self._set_state(
                 LinkState.RESET,
                 "Low-level bridge Wi-Fi enabled."
@@ -635,6 +952,10 @@ class LinkRuntime:
             self._tcp_connected = False
             self._bridge_ready = False
             self._clear_connection_fault_locked()
+            self._bottom_layer_retry_count = 0
+            self._top_layer_failure_count = 0
+            self._top_layer_connect_streak = 0
+            self._last_peer_sequence = None
             self._set_state(LinkState.RESET, "Server reset issued. Transmission stopped and buffers cleared.")
             if not self._try_send_command_locked(
                 MessageType.RESET,
@@ -656,7 +977,7 @@ class LinkRuntime:
 
         with self._lock:
             self._poll_received_frames_locked()
-            if self._current_state is LinkState.WAIT_FOR_COM_RESET:
+            if self._current_state is LinkState.ERROR:
                 self._append_log("Initialize ignored because Reset Communication is required to clear the latched fault.")
                 return self._snapshot_locked()
             self._clear_runtime_flow_locked()
@@ -689,13 +1010,13 @@ class LinkRuntime:
 
         with self._lock:
             self._poll_received_frames_locked()
-            if self._current_state is LinkState.WAIT_FOR_COM_RESET:
+            if self._current_state is LinkState.ERROR:
                 self._append_log("Send data ignored because Reset Communication is required to clear the latched fault.")
                 return self._snapshot_locked()
             if not self._initialize_completed or not self._connect_completed:
                 self._set_runtime_fault_locked("send data invoke rejected: server has not completed initialize and connect")
                 return self._snapshot_locked()
-            if self._current_state is not LinkState.KEEPALIVE:
+            if self._current_state not in (LinkState.KEEPALIVE_SERVER_SEND, LinkState.KEEPALIVE_CLIENT_RETURN):
                 self._set_runtime_fault_locked("send data invoke rejected: keepalive-ready connection is not available")
                 return self._snapshot_locked()
             if not self._try_send_command_locked(
@@ -704,19 +1025,53 @@ class LinkRuntime:
                 "send data transmit failed",
             ):
                 return self._snapshot_locked()
-            self._set_state(LinkState.KEEPALIVE, "Send-data command issued during keepalive.")
+            self._set_state(self._current_state, "Send-data command issued during keepalive.")
+            return self._snapshot_locked()
+
+    def reset_total_errors(self) -> LinkSnapshot:
+        """@brief Reset the aggregate telemetry error counter to zero."""
+
+        with self._lock:
+            transport_snapshot = serial_link_manager.get_snapshot()
+            if transport_snapshot.port_open:
+                try:
+                    self._send_command_locked(MessageType.DATA, "telemetry_reset")
+                except RuntimeError as exc:
+                    self._append_log(f"Telemetry reset command failed: {exc}")
+            self._total_error_count = 0
+            self._append_log("Telemetry reset: total error counter cleared.")
+            return self._snapshot_locked()
+
+    def reset_transport_max_delay(self) -> LinkSnapshot:
+        """@brief Reset only the transport maximum-delay telemetry value.
+
+        @details The simulator routes this reset to the ESP32-C3 controller so
+        the authoritative firmware-owned max-delay counter is cleared at the
+        source, then mirrors the zeroed value in the current snapshot.
+        """
+
+        with self._lock:
+            transport_snapshot = serial_link_manager.get_snapshot()
+            if transport_snapshot.port_open:
+                try:
+                    self._send_command_locked(MessageType.DATA, "telemetry_reset_max_delay")
+                except RuntimeError as exc:
+                    self._append_log(f"Transport max-delay reset command failed: {exc}")
+            self._transport_max_delay_ms = 0
+            self._append_log("Telemetry reset: transport max delay cleared.")
             return self._snapshot_locked()
 
     def get_snapshot(self) -> LinkSnapshot:
         with self._lock:
             self._poll_received_frames_locked()
+            self._enforce_running_integer_timeout_locked()
             self._advance_automatic_flow_locked()
             return self._snapshot_locked()
 
     def _snapshot_locked(self) -> LinkSnapshot:
         transport_snapshot: SerialLinkSnapshot = serial_link_manager.get_snapshot()
         important_data = {
-            "Current State": self._current_state.value,
+            "Current State": self._state_display_name(self._current_state),
             "Serial Port": self._config.serial_port,
             "Port Open": "Yes" if transport_snapshot.port_open else "No",
             "Wi-Fi Enabled": "Yes" if self._wifi_enabled else "No",
@@ -730,6 +1085,14 @@ class LinkRuntime:
             "TCP Connected": "Yes" if self._tcp_connected else "No",
             "ConnectionFault": "Yes" if self._connection_fault else "No",
             "Keepalive Failures": str(self._consecutive_keepalive_failures),
+            "Transport Last Delay [mS]": str(self._transport_last_delay_ms),
+            "Transport Max Delay [mS]": str(self._transport_max_delay_ms),
+            "BottomLayer Retries": str(self._bottom_layer_retry_count),
+            "TopLayer Failures": str(self._top_layer_failure_count),
+            "Total Errors": str(self._total_error_count),
+            "TopLayer Connect Streak": str(self._top_layer_connect_streak),
+            "BottomLayer Checksum Errors": str(self._bottom_layer_checksum_error_count),
+            "BottomLayer Sequence Errors": str(self._bottom_layer_sequence_error_count),
             "Text Received From Client": self._last_received_client_text,
             "Wi-Fi Timeout (ms)": str(self._config.wifi_connect_timeout_ms),
             "TCP Timeout (ms)": str(self._config.tcp_connect_timeout_ms),
@@ -756,11 +1119,20 @@ class LinkRuntime:
             server_live_integer=self._server_live_integer,
             client_live_integer=self._client_live_integer,
             consecutive_keepalive_failures=self._consecutive_keepalive_failures,
+            bottom_layer_retry_count=self._bottom_layer_retry_count,
+            top_layer_failure_count=self._top_layer_failure_count,
+            top_layer_connect_streak=self._top_layer_connect_streak,
+            bottom_layer_checksum_error_count=self._bottom_layer_checksum_error_count,
+            bottom_layer_sequence_error_count=self._bottom_layer_sequence_error_count,
             sequence=self._sequence,
+            transport_last_delay_ms=self._transport_last_delay_ms,
+            transport_max_delay_ms=self._transport_max_delay_ms,
+            total_error_count=self._total_error_count,
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
             transport=asdict(transport_snapshot),
             logs=self._combined_logs_locked(),
+            low_level_logs=serial_link_manager.get_logs()[:2000],
             available_states=[state.value for state in LinkState],
         )
 

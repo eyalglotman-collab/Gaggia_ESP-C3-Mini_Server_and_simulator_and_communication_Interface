@@ -10,6 +10,9 @@ notifications.
 [CmdletBinding()]
 param()
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PlaybackScript = Join-Path $ProjectRoot "scripts\play_wait_sound.ps1"
 $SoundFile = Join-Path $ProjectRoot "sounds\build-success-monkey-1p5x.wav"
@@ -25,4 +28,14 @@ if (-not (Test-Path $SoundFile)) {
     throw "Build-success sound file not found: $SoundFile"
 }
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PlaybackScript -SoundFile $SoundFile
+$playProc = Start-Process powershell.exe -ArgumentList @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $PlaybackScript,
+    "-SoundFile", $SoundFile,
+    "-Background"
+) -PassThru -Wait
+
+if ($playProc.ExitCode -ne 0) {
+    throw "Build-success playback helper failed with exit code $($playProc.ExitCode)."
+}

@@ -50,5 +50,5 @@ if (-not ($IdfArgs -contains "-DIDF_TARGET=esp32c3")) {
 
 $EffectiveArgs += $IdfArgs
 
-& idf.py @EffectiveArgs
+idf.py @EffectiveArgs
 exit $LASTEXITCODE

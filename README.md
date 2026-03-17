@@ -61,10 +61,15 @@ The simulator mirrors the client’s framed protocol and low-level states.
   - `reset`
   - `initialize`
   - `connect`
-  - `keepalive`
+  - `keepalive_server_send`
+  - `keepalive_client_return`
   - `error`
 
 The simulator keeps transport logs and returns snapshot-shaped data to the UI instead of exposing mutable runtime internals directly.
+
+The keepalive contract is server-initiated: bridge firmware sends one authoritative even `ServerLiveInteger`, the client returns one odd `ClientLiveInteger`, and retry escalation is timeout-driven with three attempts.
+
+Telemetry for `Transport Last Delay [mS]`, `Transport Max Delay [mS]`, and `Total Errors` is firmware-authored on the ESP32-C3 and mirrored by the simulator UI, including `-1` last-delay markers outside keepalive states.
 
 ## API Surface
 

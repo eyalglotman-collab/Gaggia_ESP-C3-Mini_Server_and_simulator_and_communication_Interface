@@ -138,3 +138,17 @@ def command_send_data(request: SendDataRequest | None = None) -> dict[str, objec
 
     payload_text = request.payload_text if request is not None else "espresso_payload"
     return _run_snapshot_action("command_send_data", lambda: link_runtime.send_data(payload_text))
+
+
+@router.post("/telemetry/reset-total-errors")
+def telemetry_reset_total_errors() -> dict[str, object]:
+    """@brief Reset the aggregate telemetry error counter on operator request."""
+
+    return _run_snapshot_action("telemetry_reset_total_errors", link_runtime.reset_total_errors)
+
+
+@router.post("/telemetry/reset-max-delay")
+def telemetry_reset_max_delay() -> dict[str, object]:
+    """@brief Reset the transport max-delay telemetry value on operator request."""
+
+    return _run_snapshot_action("telemetry_reset_max_delay", link_runtime.reset_transport_max_delay)

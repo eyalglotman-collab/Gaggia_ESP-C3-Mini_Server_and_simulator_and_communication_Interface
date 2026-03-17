@@ -21,6 +21,9 @@ param(
     [int]$IntervalSeconds = 180
 )
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PidFile = Join-Path $ProjectRoot ".cache\wait_sound.pid"
 $SoundFile = Join-Path $ProjectRoot "sounds\WaitSound.wav"

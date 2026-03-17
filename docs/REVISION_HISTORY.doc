@@ -2,10 +2,16 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.17\par
-- Summary: Stabilized bridge/client communication with session/request-correlated keepalive supervision and validated sustained keepalive operation after flash.\par
+- Version: 0.1.18\par
+- Summary: Added split keepalive state telemetry alignment, controller-authored delay markers, and enhanced simulator observability tooling.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-17 14:52:00\b0\par
+- Version: 0.1.18\par
+- Firmware Version: 0.1.18\par
+- Summary: Split keepalive runtime states, moved last-delay -1 semantics to ESP32-C3 firmware telemetry, and expanded simulator UI diagnostics.\par
+- Notes: `firmware/esp32c3_bridge/main/bridge_main.c` now reports controller-owned signed telemetry (`td_last_ms`, `td_max_ms`, `terr`) with `td_last_ms=-1` outside keepalive states and pushes telemetry updates on state transitions. `server/sim/link_state_machine.py` now parses signed delay telemetry and mirrors controller values directly. `server/ui/index.html` now includes synchronized pause controls across both loggers, telemetry reset actions, regex-based logger filtering, and a dedicated `SERVER/CLIENT DELAY` rolling plot with marker rendering and invalid-state highlighting. Architecture docs and README were aligned to `KeepAliveServerSend` and `KeepAliveClientReturn` naming.\par
+\par
 \b 2026-03-16 14:54:00\b0\par
 - Version: 0.1.17\par
 - Firmware Version: 0.1.17\par

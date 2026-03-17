@@ -10,6 +10,9 @@ from a clean state.
 [CmdletBinding()]
 param()
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PidFile = Join-Path $ProjectRoot ".cache\wait_sound.pid"
 

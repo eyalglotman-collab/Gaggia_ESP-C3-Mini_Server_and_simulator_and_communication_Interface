@@ -48,7 +48,7 @@
 #define BRIDGE_TCP_PORT                 3333
 #define BRIDGE_TCP_RX_BUFFER_SIZE       512
 #define BRIDGE_KEEPALIVE_PERIOD_MS      300
-#define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 300
+#define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 450
 #define BRIDGE_RUNNING_INTEGER_RETRY_LIMIT 3U
 
 #define BRIDGE_SOF_BYTE0                0xA5
@@ -60,8 +60,8 @@ typedef enum {
     BRIDGE_STATE_RESET = 0,
     BRIDGE_STATE_INITIALIZE = 1,
     BRIDGE_STATE_CONNECT = 2,
-    BRIDGE_STATE_DEBUG_INTERIM = 3,
-    BRIDGE_STATE_KEEPALIVE = 4,
+    BRIDGE_STATE_KEEPALIVE_SERVER_SEND = 3,
+    BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN = 4,
     BRIDGE_STATE_DISCONNECT = 5,
     BRIDGE_STATE_ERROR = 6,
 } bridge_state_t;
@@ -114,7 +114,9 @@ static uint32_t s_next_session_id = 1U;
 static uint32_t s_next_keepalive_request_id = 1U;
 static uint32_t s_pending_keepalive_request_id = 0U;
 static uint32_t s_last_completed_keepalive_request_id = 0U;
-static bool s_interim_debug_logged = false;
+static int32_t s_transport_last_delay_ms = -1;
+static uint32_t s_transport_max_delay_ms = 0U;
+static uint32_t s_total_error_count = 0U;
 static int64_t s_keepalive_window_started_us = 0;
 static int64_t s_reset_cycle_started_us = 0;
 
@@ -128,16 +130,23 @@ static bool bridge_try_parse_u32_payload_value(const char *payload_text,
                                                uint32_t *out_value);
 static void bridge_build_keepalive_payload(char *buffer,
                                            size_t buffer_length,
+                                           const char *tag_text,
                                            uint32_t session_id,
                                            uint32_t request_id);
 static void bridge_send_server_keepalive(bool reuse_pending_request_id);
 static void bridge_start_keepalive_window(bool clear_transport_buffer);
 static void bridge_mark_keepalive_window_message(void);
-static void bridge_log_interim_debug_state(void);
-static void bridge_service_debug_interim_state(void);
 static void bridge_service_keepalive_engine(void);
 static void bridge_service_transport_watchdog(void);
 static void bridge_handle_running_integer_failure(const char *fault_reason);
+static void bridge_record_error(const char *reason_text);
+static uint32_t bridge_compute_pending_keepalive_delay_ms(void);
+static void bridge_reset_telemetry_counters(void);
+static void bridge_reset_transport_max_delay(void);
+static void bridge_update_transport_last_delay_for_state(bridge_state_t state);
+static void bridge_send_telemetry_update_usb(void);
+static void bridge_send_unsolicited_usb_frame(bridge_message_type_t message_type,
+                                              const char *payload_text);
 
 /**
  * @brief Convert one bridge state enum into printable text.
@@ -157,10 +166,10 @@ static const char *bridge_state_to_string(bridge_state_t state)
         return "Initialize";
     case BRIDGE_STATE_CONNECT:
         return "Connect";
-    case BRIDGE_STATE_DEBUG_INTERIM:
-        return "InterimDebug";
-    case BRIDGE_STATE_KEEPALIVE:
-        return "KeepAlive";
+    case BRIDGE_STATE_KEEPALIVE_SERVER_SEND:
+        return "KeepAliveServerSend";
+    case BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN:
+        return "KeepAliveClientReturn";
     case BRIDGE_STATE_DISCONNECT:
         return "Disconnect";
     case BRIDGE_STATE_ERROR:
@@ -173,14 +182,16 @@ static const char *bridge_state_to_string(bridge_state_t state)
 /**
  * @brief Transition the bridge runtime state with uniform bookkeeping.
  *
- * @details Records reset-cycle start timestamps and clears one-shot interim
- * logging flags whenever the state machine leaves interim-debug.
+ * @details Records reset-cycle start timestamps and clears keepalive/session
+ * bookkeeping whenever the state machine re-enters reset.
  *
  * @param[in] next_state New state to enter.
  */
 static void bridge_enter_state(bridge_state_t next_state)
 {
-    if (s_bridge_state != next_state) {
+    bool state_changed = (s_bridge_state != next_state);
+
+    if (state_changed) {
         ESP_LOGI(TAG,
                  "State %s -> %s",
                  bridge_state_to_string(s_bridge_state),
@@ -188,6 +199,10 @@ static void bridge_enter_state(bridge_state_t next_state)
     }
 
     s_bridge_state = next_state;
+    bridge_update_transport_last_delay_for_state(next_state);
+    if (state_changed) {
+        bridge_send_telemetry_update_usb();
+    }
     if (next_state == BRIDGE_STATE_RESET) {
         s_reset_cycle_started_us = esp_timer_get_time();
         s_running_integer_retry_count = 0U;
@@ -199,9 +214,6 @@ static void bridge_enter_state(bridge_state_t next_state)
         s_pending_keepalive_request_id = 0U;
         s_last_completed_keepalive_request_id = 0U;
         s_next_keepalive_request_id = 1U;
-    }
-    if (next_state != BRIDGE_STATE_DEBUG_INTERIM) {
-        s_interim_debug_logged = false;
     }
 }
 
@@ -353,18 +365,132 @@ static bool bridge_try_parse_u32_payload_value(const char *payload_text,
 }
 
 /**
- * @brief Build one keepalive request payload with correlation metadata.
+ * @brief Increment the aggregate telemetry error counter.
  *
- * @details The bridge owns session and request identifiers and sends both so
- * the client can echo them in keepalive responses.
+ * @details The simulator UI uses this firmware-owned counter as the
+ * authoritative total of low-level and top-layer communication faults.
+ *
+ * @param[in] reason_text Optional reason string for future diagnostics.
+ */
+static void bridge_record_error(const char *reason_text)
+{
+    (void)reason_text;
+    s_total_error_count++;
+}
+
+/**
+ * @brief Compute the keepalive round-trip delay of the pending request.
+ *
+ * @details Delay is measured on the ESP32-C3 from keepalive request
+ * transmission to a validated matching client response.
+ *
+ * @return Delay in milliseconds, clamped to zero for invalid timestamps.
+ */
+static uint32_t bridge_compute_pending_keepalive_delay_ms(void)
+{
+    int64_t now_us = 0;
+    int64_t delta_us = 0;
+
+    if (s_last_keepalive_tx_us <= 0) {
+        return 0U;
+    }
+
+    now_us = esp_timer_get_time();
+    delta_us = now_us - s_last_keepalive_tx_us;
+    if (delta_us < 0) {
+        delta_us = 0;
+    }
+
+    if (delta_us == 0) {
+        return 0U;
+    }
+
+    return (uint32_t)((delta_us + 999LL) / 1000LL);
+}
+
+/**
+ * @brief Clear bridge-owned telemetry counters.
+ *
+ * @details Operators can reset telemetry without resetting the transport state
+ * machine by issuing `DATA telemetry_reset` from the simulator host.
+ */
+static void bridge_reset_telemetry_counters(void)
+{
+    bridge_update_transport_last_delay_for_state(s_bridge_state);
+    s_transport_max_delay_ms = 0U;
+    s_total_error_count = 0U;
+}
+
+/**
+ * @brief Clear only the bridge maximum-delay telemetry value.
+ *
+ * @details The operator UI uses this to restart max-delay tracking without
+ * erasing the current `last delay` sample or total error history.
+ */
+static void bridge_reset_transport_max_delay(void)
+{
+    s_transport_max_delay_ms = 0U;
+}
+
+/**
+ * @brief Keep last-delay semantics aligned with the active TopLayer state.
+ *
+ * @details The controller is authoritative for transport delay telemetry.
+ * Outside keepalive phases, `Transport Last Delay` is explicitly reported as
+ * `-1` so the host can distinguish "no keepalive exchange active" from a
+ * valid measured delay.
+ *
+ * @param[in] state Bridge runtime state to evaluate.
+ */
+static void bridge_update_transport_last_delay_for_state(bridge_state_t state)
+{
+    if (state == BRIDGE_STATE_KEEPALIVE_SERVER_SEND || state == BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN) {
+        /* Keepalive phases preserve the previous value until a real response
+         * measurement updates it, avoiding synthetic zero-delay samples. */
+        return;
+    }
+
+    s_transport_last_delay_ms = -1;
+}
+
+/**
+ * @brief Emit one USB telemetry snapshot payload with delay and error counters.
+ *
+ * @details Host-side dashboards consume this payload to reflect controller
+ * telemetry updates immediately, including `-1` delay when outside keepalive.
+ */
+static void bridge_send_telemetry_update_usb(void)
+{
+    char telemetry_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+
+    snprintf(
+        telemetry_payload,
+        sizeof(telemetry_payload),
+        "telemetry;td_last_ms=%" PRId32 ";td_max_ms=%" PRIu32 ";terr=%" PRIu32,
+        s_transport_last_delay_ms,
+        s_transport_max_delay_ms,
+        s_total_error_count);
+
+    bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_DATA, telemetry_payload);
+}
+
+/**
+ * @brief Build one keepalive payload with correlation metadata.
+ *
+ * @details The bridge uses `ka_req` for server-issued keepalive requests and
+ * `ka_resp` when mirroring a validated client response to the simulator host.
+ * The same payload also carries firmware-owned telemetry fields for delay and
+ * total error counters.
  *
  * @param[out] buffer Destination payload buffer.
  * @param[in] buffer_length Destination buffer size in bytes.
+ * @param[in] tag_text Keepalive payload tag (`ka_req` or `ka_resp`).
  * @param[in] session_id Active bridge session id.
  * @param[in] request_id Keepalive request id for this exchange.
  */
 static void bridge_build_keepalive_payload(char *buffer,
                                            size_t buffer_length,
+                                           const char *tag_text,
                                            uint32_t session_id,
                                            uint32_t request_id)
 {
@@ -374,9 +500,13 @@ static void bridge_build_keepalive_payload(char *buffer,
 
     snprintf(buffer,
              buffer_length,
-             "ka_req;sid=%" PRIu32 ";req=%" PRIu32,
+             "%s;sid=%" PRIu32 ";req=%" PRIu32 ";td_last_ms=%" PRId32 ";td_max_ms=%" PRIu32 ";terr=%" PRIu32,
+             (tag_text != NULL) ? tag_text : "ka_req",
              session_id,
-             request_id);
+             request_id,
+             s_transport_last_delay_ms,
+             s_transport_max_delay_ms,
+             s_total_error_count);
 }
 
 /**
@@ -751,9 +881,17 @@ static void bridge_send_server_keepalive(bool reuse_pending_request_id)
         s_pending_keepalive_request_id = request_id;
     }
 
+    if ((s_server_live_integer & 1U) != 0U) {
+        s_server_live_integer++;
+    }
+    if ((s_client_live_integer & 1U) == 0U) {
+        s_client_live_integer++;
+    }
+
     bridge_build_keepalive_payload(
         keepalive_payload,
         sizeof(keepalive_payload),
+        "ka_req",
         s_active_session_id,
         request_id);
     bridge_send_frame(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_KEEPALIVE, &synthetic_keepalive, keepalive_payload);
@@ -762,6 +900,7 @@ static void bridge_send_server_keepalive(bool reuse_pending_request_id)
     s_keepalive_response_pending = true;
     s_keepalive_empty_window_count = 0U;
     bridge_start_keepalive_window(false);
+    bridge_enter_state(BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN);
 }
 
 /**
@@ -796,68 +935,11 @@ static void bridge_mark_keepalive_window_message(void)
 }
 
 /**
- * @brief Emit one detailed state snapshot for the interim-debug stage.
+ * @brief Handle keepalive timeout exhaustion and restart the link workflow.
  *
- * @details Logs elapsed reset-to-debug time together with retry/timeout
- * counters so unstable bring-up can be diagnosed from textual ESP logs.
- */
-static void bridge_log_interim_debug_state(void)
-{
-    int64_t now_us = esp_timer_get_time();
-    uint32_t reset_to_debug_ms = 0U;
-
-    if (s_interim_debug_logged || s_bridge_state != BRIDGE_STATE_DEBUG_INTERIM) {
-        return;
-    }
-
-    if (s_reset_cycle_started_us > 0 && now_us >= s_reset_cycle_started_us) {
-        reset_to_debug_ms = (uint32_t)((now_us - s_reset_cycle_started_us) / 1000LL);
-    }
-
-    ESP_LOGI(TAG,
-             "InterimDebug details: reset_to_debug_ms=%" PRIu32
-             ", running_retries=%" PRIu32
-             ", timeout_events=%" PRIu32
-             ", tcp_client=%s",
-             reset_to_debug_ms,
-             s_running_integer_retry_count,
-             s_timeout_event_count,
-             (s_tcp_client_fd >= 0) ? "connected" : "disconnected");
-    s_interim_debug_logged = true;
-}
-
-/**
- * @brief Process the bridge interim-debug state and promote into keepalive.
- *
- * @details This debug-only gate logs transition telemetry once, then starts
- * keepalive supervision only after both peers finished the connect handshake.
- */
-static void bridge_service_debug_interim_state(void)
-{
-    if (s_bridge_state != BRIDGE_STATE_DEBUG_INTERIM) {
-        return;
-    }
-
-    bridge_log_interim_debug_state();
-    if (s_tcp_client_fd < 0) {
-        bridge_enter_state(BRIDGE_STATE_INITIALIZE);
-        return;
-    }
-
-    s_keepalive_response_pending = false;
-    s_last_keepalive_tx_us = 0;
-    bridge_enter_state(BRIDGE_STATE_KEEPALIVE);
-    bridge_send_server_keepalive(false);
-}
-
-/**
- * @brief Retry or tear down after a running-integer validation failure.
- *
- * @details Both peers get up to three retries for counter mismatch/timeouts.
- * While retries remain, the bridge keeps the TCP session open and resends the
- * current keepalive request id without reseeding counters.
- * After the third failure, the bridge closes the TCP session and returns to
- * initialize wait.
+ * @details The bridge retries keepalive response timeouts three times in
+ * `KeepAliveClientReturn`. If all retries fail, the TCP session is closed and
+ * the state machine returns to initialize wait.
  *
  * @param[in] fault_reason Short ASCII reason text.
  */
@@ -865,26 +947,9 @@ static void bridge_handle_running_integer_failure(const char *fault_reason)
 {
     const char *reason_text = (fault_reason != NULL) ? fault_reason : "running_integer_failure";
 
-    s_running_integer_retry_count++;
-    if (s_running_integer_retry_count < BRIDGE_RUNNING_INTEGER_RETRY_LIMIT && s_tcp_client_fd >= 0) {
-        ESP_LOGW(TAG,
-                 "Running-integer retry (%" PRIu32 "/%" PRIu32 "): %s",
-                 s_running_integer_retry_count,
-                 BRIDGE_RUNNING_INTEGER_RETRY_LIMIT,
-                 reason_text);
-        bridge_notify_usb_fault(reason_text);
-        s_keepalive_response_pending = false;
-        s_keepalive_window_has_message = false;
-        s_keepalive_window_started_us = 0;
-        s_keepalive_empty_window_count = 0U;
-        s_last_keepalive_tx_us = 0;
-        bridge_enter_state(BRIDGE_STATE_KEEPALIVE);
-        bridge_send_server_keepalive(true);
-        return;
-    }
-
+    bridge_record_error(reason_text);
     ESP_LOGE(TAG,
-             "Running-integer retries exhausted (%" PRIu32 "/%" PRIu32 "): %s",
+             "Running-integer timeout retries exhausted (%" PRIu32 "/%" PRIu32 "): %s",
              s_running_integer_retry_count,
              BRIDGE_RUNNING_INTEGER_RETRY_LIMIT,
              reason_text);
@@ -892,18 +957,17 @@ static void bridge_handle_running_integer_failure(const char *fault_reason)
     bridge_close_tcp_client();
     bridge_enter_state(BRIDGE_STATE_INITIALIZE);
     s_server_live_integer = 0U;
-    s_client_live_integer = 0U;
+    s_client_live_integer = BRIDGE_DEVICE_LIVE_START;
     s_tcp_sequence = 0U;
     s_running_integer_retry_count = 0U;
 }
 
 /**
- * @brief Pace bridge-owned keepalive initiation at the configured cadence.
+ * @brief Service the server-send phase of keepalive supervision.
  *
- * @details Once a TCP client is attached and the previous keepalive exchange
- * has completed successfully, the bridge sends the next authoritative
- * keepalive after the fixed period. This avoids using unrelated TCP activity
- * as a proxy for transport liveness.
+ * @details In `KeepAliveServerSend`, the bridge emits one keepalive request
+ * using the current even `ServerLiveInteger`, then transitions into
+ * `KeepAliveClientReturn` to wait for a valid client response.
  */
 static void bridge_service_keepalive_engine(void)
 {
@@ -911,7 +975,7 @@ static void bridge_service_keepalive_engine(void)
 
     if (s_tcp_client_fd < 0 ||
         s_keepalive_response_pending ||
-        s_bridge_state != BRIDGE_STATE_KEEPALIVE) {
+        s_bridge_state != BRIDGE_STATE_KEEPALIVE_SERVER_SEND) {
         return;
     }
 
@@ -925,19 +989,18 @@ static void bridge_service_keepalive_engine(void)
 }
 
 /**
- * @brief Enforce the low-level TCP keepalive watchdog inside the bridge.
+ * @brief Enforce keepalive response timeouts while waiting for the client.
  *
- * @details The ESP32-C3 owns the real TCP session with the client and must be
- * the source of truth for connection-loss detection. For each pending
- * keepalive request id, the bridge tracks one 0.3-second response deadline and
- * retries the same request id until retries are exhausted.
+ * @details Timeout retries are the only TopLayer retry cause in the keepalive
+ * phases. Counter mismatches and stale metadata are logged and ignored while
+ * the bridge keeps waiting in `KeepAliveClientReturn` until timeout.
  */
 static void bridge_service_transport_watchdog(void)
 {
     if (s_tcp_client_fd < 0 ||
         !s_keepalive_response_pending ||
         s_last_keepalive_tx_us <= 0 ||
-        s_bridge_state != BRIDGE_STATE_KEEPALIVE) {
+        s_bridge_state != BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN) {
         return;
     }
 
@@ -953,12 +1016,24 @@ static void bridge_service_transport_watchdog(void)
     }
 
     s_timeout_event_count++;
+    s_running_integer_retry_count++;
+    bridge_record_error("keepalive_response_timeout");
     ESP_LOGW(TAG,
-             "Keepalive response timeout: sid=%" PRIu32 " req=%" PRIu32 " after %u ms",
+             "Keepalive response timeout retry (%" PRIu32 "/%" PRIu32 "): sid=%" PRIu32
+             " req=%" PRIu32 " after %u ms",
+             s_running_integer_retry_count,
+             BRIDGE_RUNNING_INTEGER_RETRY_LIMIT,
              s_active_session_id,
              s_pending_keepalive_request_id,
              BRIDGE_KEEPALIVE_WAIT_WINDOW_MS);
-    bridge_handle_running_integer_failure("keepalive_response_timeout");
+
+    if (s_running_integer_retry_count >= BRIDGE_RUNNING_INTEGER_RETRY_LIMIT) {
+        bridge_handle_running_integer_failure("keepalive_response_timeout");
+        return;
+    }
+
+    bridge_enter_state(BRIDGE_STATE_KEEPALIVE_SERVER_SEND);
+    bridge_send_server_keepalive(true);
 }
 
 /**
@@ -1005,7 +1080,6 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
         break;
     case BRIDGE_MESSAGE_INITIALIZE:
         bridge_enter_state(BRIDGE_STATE_INITIALIZE);
-        s_tcp_sequence = 0U;
         s_running_integer_retry_count = 0U;
         s_keepalive_window_has_message = false;
         s_keepalive_window_started_us = 0;
@@ -1022,7 +1096,6 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
         bridge_enter_state(BRIDGE_STATE_CONNECT);
         s_server_live_integer = 0U;
         s_client_live_integer = BRIDGE_DEVICE_LIVE_START;
-        s_tcp_sequence = 0U;
         s_running_integer_retry_count = 0U;
         s_last_tcp_activity_us = (s_tcp_client_fd >= 0) ? esp_timer_get_time() : 0;
         s_last_keepalive_tx_us = 0;
@@ -1041,13 +1114,13 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
         if (transport == BRIDGE_TRANSPORT_TCP) {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, connect_payload);
             bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ACK, connect_payload);
-            bridge_enter_state(BRIDGE_STATE_DEBUG_INTERIM);
+            bridge_enter_state(BRIDGE_STATE_KEEPALIVE_SERVER_SEND);
         } else {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, connect_payload);
         }
         if (transport == BRIDGE_TRANSPORT_USB && s_tcp_client_fd >= 0) {
             bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_ACK, connect_payload);
-            bridge_enter_state(BRIDGE_STATE_DEBUG_INTERIM);
+            bridge_enter_state(BRIDGE_STATE_KEEPALIVE_SERVER_SEND);
         }
         break;
     }
@@ -1065,53 +1138,97 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             bool has_session_id = bridge_try_parse_u32_payload_value(payload_text, "sid", &payload_session_id);
             bool has_request_id = bridge_try_parse_u32_payload_value(payload_text, "req", &payload_request_id);
             uint32_t expected_client_live_integer = s_server_live_integer + 1U;
+            uint32_t measured_delay_ms = 0U;
 
-            if (!s_keepalive_response_pending || s_pending_keepalive_request_id == 0U) {
-                ESP_LOGW(TAG,
-                         "Ignoring unexpected keepalive response with no pending request (sid=%" PRIu32 ", req=%" PRIu32 ")",
-                         payload_session_id,
-                         payload_request_id);
-                break;
-            }
             if (!has_session_id || !has_request_id) {
-                bridge_handle_running_integer_failure("keepalive_metadata_missing");
+                bridge_record_error("keepalive_missing_sid_req");
+                ESP_LOGW(TAG, "Ignoring keepalive response missing sid/req metadata");
                 break;
             }
             if (payload_session_id != s_active_session_id) {
+                bridge_record_error("keepalive_stale_session");
                 ESP_LOGW(TAG,
                          "Ignoring stale keepalive session response sid=%" PRIu32 " active=%" PRIu32,
                          payload_session_id,
                          s_active_session_id);
                 break;
             }
+
+            if (!s_keepalive_response_pending || s_pending_keepalive_request_id == 0U) {
+                if (payload_request_id == s_last_completed_keepalive_request_id &&
+                    s_last_completed_keepalive_request_id != 0U) {
+                    ESP_LOGI(TAG,
+                             "Ignoring duplicate keepalive response already completed: sid=%" PRIu32 " req=%" PRIu32,
+                             payload_session_id,
+                             payload_request_id);
+                } else {
+                    bridge_record_error("keepalive_unexpected_no_pending");
+                    ESP_LOGW(TAG,
+                             "Ignoring unexpected keepalive response with no pending request (sid=%" PRIu32 ", req=%" PRIu32 ")",
+                             payload_session_id,
+                             payload_request_id);
+                }
+                break;
+            }
+            if (s_bridge_state != BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN) {
+                bridge_record_error("keepalive_unexpected_state");
+                ESP_LOGW(TAG, "Ignoring keepalive response outside KeepAliveClientReturn");
+                break;
+            }
             if (payload_request_id != s_pending_keepalive_request_id) {
-                ESP_LOGW(TAG,
-                         "Ignoring stale keepalive request response req=%" PRIu32 " pending=%" PRIu32,
-                         payload_request_id,
-                         s_pending_keepalive_request_id);
+                if (payload_request_id == s_last_completed_keepalive_request_id &&
+                    s_last_completed_keepalive_request_id != 0U) {
+                    ESP_LOGI(TAG,
+                             "Ignoring duplicate keepalive response already completed: sid=%" PRIu32 " req=%" PRIu32,
+                             payload_session_id,
+                             payload_request_id);
+                } else {
+                    bridge_record_error("keepalive_stale_request_id");
+                    ESP_LOGW(TAG,
+                             "Ignoring stale keepalive request response req=%" PRIu32 " pending=%" PRIu32,
+                             payload_request_id,
+                             s_pending_keepalive_request_id);
+                }
                 break;
             }
             if (frame->host_live_integer != s_server_live_integer ||
-                frame->device_live_integer != expected_client_live_integer) {
-                bridge_send_frame(transport, BRIDGE_MESSAGE_ERROR, frame, "keepalive_counter_mismatch");
-                bridge_handle_running_integer_failure("keepalive_counter_mismatch");
+                frame->device_live_integer != expected_client_live_integer ||
+                ((frame->host_live_integer & 1U) != 0U) ||
+                ((frame->device_live_integer & 1U) == 0U)) {
+                bridge_record_error("keepalive_counter_mismatch");
+                ESP_LOGW(TAG,
+                         "Ignoring keepalive counter mismatch while waiting: expected server=%" PRIu32
+                         " client=%" PRIu32 ", got server=%" PRIu32 " client=%" PRIu32,
+                         s_server_live_integer,
+                         expected_client_live_integer,
+                         frame->host_live_integer,
+                         frame->device_live_integer);
                 break;
             }
 
+            measured_delay_ms = bridge_compute_pending_keepalive_delay_ms();
+            s_transport_last_delay_ms = (int32_t)measured_delay_ms;
+            if (measured_delay_ms > s_transport_max_delay_ms) {
+                s_transport_max_delay_ms = measured_delay_ms;
+            }
             s_last_tcp_activity_us = esp_timer_get_time();
             s_client_live_integer = frame->device_live_integer;
             s_server_live_integer = s_client_live_integer + 1U;
+            if ((s_server_live_integer & 1U) != 0U) {
+                s_server_live_integer++;
+            }
             bridge_mark_keepalive_window_message();
             s_keepalive_response_pending = false;
             s_keepalive_window_started_us = 0;
             s_pending_keepalive_request_id = 0U;
             s_last_completed_keepalive_request_id = payload_request_id;
             s_running_integer_retry_count = 0U;
-            bridge_enter_state(BRIDGE_STATE_KEEPALIVE);
+            bridge_enter_state(BRIDGE_STATE_KEEPALIVE_SERVER_SEND);
             char keepalive_status_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
             bridge_build_keepalive_payload(
                 keepalive_status_payload,
                 sizeof(keepalive_status_payload),
+                "ka_resp",
                 s_active_session_id,
                 payload_request_id);
             bridge_send_unsolicited_usb_frame(BRIDGE_MESSAGE_KEEPALIVE, keepalive_status_payload);
@@ -1128,18 +1245,29 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             if (ret == ESP_OK) {
                 bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "wifi_enabled");
             } else {
+                bridge_record_error("wifi_enable_failed");
                 bridge_send_frame(transport, BRIDGE_MESSAGE_ERROR, frame, "wifi_enable_failed");
             }
+        } else if (transport == BRIDGE_TRANSPORT_USB && strcmp(payload_text, "telemetry_reset") == 0) {
+            bridge_reset_telemetry_counters();
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "telemetry_reset_ack");
+            bridge_send_telemetry_update_usb();
+        } else if (transport == BRIDGE_TRANSPORT_USB && strcmp(payload_text, "telemetry_reset_max_delay") == 0) {
+            bridge_reset_transport_max_delay();
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "telemetry_reset_max_delay_ack");
+            bridge_send_telemetry_update_usb();
         } else {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
         }
         break;
     case BRIDGE_MESSAGE_ERROR:
+        bridge_record_error("bridge_message_error");
         bridge_enter_state(BRIDGE_STATE_ERROR);
         bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "error_ack");
         break;
     case BRIDGE_MESSAGE_ACK:
     default:
+        bridge_record_error("unsupported_message_type");
         bridge_send_frame(transport, BRIDGE_MESSAGE_ERROR, frame, "unsupported");
         break;
     }
@@ -1264,6 +1392,7 @@ static void bridge_poll_tcp_client(void)
         payload_length = (uint16_t)(s_tcp_rx_buffer[3] | ((uint16_t)s_tcp_rx_buffer[4] << 8));
         frame_length = BRIDGE_FRAME_OVERHEAD + payload_length;
         if (payload_length > BRIDGE_FRAME_MAX_PAYLOAD) {
+            bridge_record_error("tcp_payload_too_large");
             ESP_LOGW(TAG, "Closing TCP client: payload too large (%u)", payload_length);
             bridge_close_tcp_client();
             return;
@@ -1274,6 +1403,7 @@ static void bridge_poll_tcp_client(void)
 
         if (bridge_parse_frame(s_tcp_rx_buffer, frame_length, &frame) != ESP_OK) {
             ESP_LOGW(TAG, "Closing TCP client: frame parse failed");
+            bridge_record_error("tcp_frame_parse_failed");
             bridge_notify_usb_fault("tcp_frame_parse_failed");
             bridge_close_tcp_client();
             return;
@@ -1300,6 +1430,7 @@ void app_main(void)
     s_reset_cycle_started_us = esp_timer_get_time();
 
     if (init_result != ESP_OK) {
+        bridge_record_error("transport_init_failed");
         bridge_enter_state(BRIDGE_STATE_ERROR);
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -1308,6 +1439,7 @@ void app_main(void)
 
     init_result = bridge_wifi_init_softap();
     if (init_result != ESP_OK) {
+        bridge_record_error("wifi_init_failed");
         bridge_enter_state(BRIDGE_STATE_ERROR);
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -1316,6 +1448,7 @@ void app_main(void)
 
     init_result = bridge_tcp_server_init();
     if (init_result != ESP_OK) {
+        bridge_record_error("tcp_server_init_failed");
         bridge_enter_state(BRIDGE_STATE_ERROR);
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -1326,7 +1459,6 @@ void app_main(void)
         if (s_wifi_transport_enabled) {
             bridge_accept_tcp_client();
             bridge_poll_tcp_client();
-            bridge_service_debug_interim_state();
             bridge_service_keepalive_engine();
             bridge_service_transport_watchdog();
         }

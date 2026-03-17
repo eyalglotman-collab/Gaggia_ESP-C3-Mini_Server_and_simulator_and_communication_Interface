@@ -13,8 +13,12 @@ Absolute or relative path to the sound file that should be played.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$SoundFile
+    [string]$SoundFile,
+    [switch]$Background
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
 # @brief Play one sound synchronously.
 # @details Tries multiple Windows playback backends so notification playback is
@@ -24,12 +28,28 @@ if (-not (Test-Path $SoundFile)) {
     throw "Sound file not found: $SoundFile"
 }
 
+$resolvedSoundFile = (Resolve-Path $SoundFile).Path
+
+if ($Background) {
+    $child = Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $PSCommandPath,
+        "-SoundFile", $resolvedSoundFile
+    ) -PassThru
+    Write-Output ("Started sound process PID {0}" -f $child.Id)
+    exit 0
+}
+
 $playSucceeded = $false
 $lastError = $null
+$player = $null
+$mediaPlayer = $null
+$state = 0
 
 try {
     Add-Type -AssemblyName System
-    $player = New-Object System.Media.SoundPlayer $SoundFile
+    $player = New-Object System.Media.SoundPlayer $resolvedSoundFile
     $player.Load()
     $player.PlaySync()
     $playSucceeded = $true
@@ -42,7 +62,7 @@ if (-not $playSucceeded) {
         # WMP is used as a fallback when `SoundPlayer` cannot decode or output the file.
         $mediaPlayer = New-Object -ComObject WMPlayer.OCX
         $mediaPlayer.settings.volume = 100
-        $mediaPlayer.URL = (Resolve-Path $SoundFile).Path
+        $mediaPlayer.URL = $resolvedSoundFile
         $mediaPlayer.controls.play()
         $deadline = (Get-Date).AddSeconds(15)
         do {
@@ -53,7 +73,7 @@ if (-not $playSucceeded) {
     } catch {
         $lastError = $_
     } finally {
-        if ($mediaPlayer) {
+        if ($null -ne $mediaPlayer) {
             try { $mediaPlayer.controls.stop() } catch {}
             try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($mediaPlayer) } catch {}
         }

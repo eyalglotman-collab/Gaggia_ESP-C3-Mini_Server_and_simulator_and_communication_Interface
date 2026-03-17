@@ -359,6 +359,20 @@
       min-height:0;
     }
 
+    .low-level-layout {
+      display:grid;
+      grid-template-columns:minmax(0, .75fr) minmax(420px, 1.25fr);
+      gap:12px;
+      min-height:0;
+    }
+
+    .delay-layout {
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      min-height:0;
+    }
+
     .lifecycle-left-stack {
       display:flex;
       flex-direction:column;
@@ -387,11 +401,39 @@
       flex-wrap:wrap;
     }
 
+    .telemetry-actions {
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      align-items:center;
+    }
+
     .row {
       display:flex;
       gap:8px;
       flex-wrap:wrap;
       align-items:end;
+    }
+
+    .delay-plot-summary {
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      flex-wrap:wrap;
+      color:var(--muted);
+      font-size:.72rem;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+
+    .delay-plot-canvas {
+      width:100%;
+      height:340px;
+      display:block;
+      border-radius:14px;
+      border:1px solid rgba(151, 180, 201, .24);
+      background:linear-gradient(180deg, rgba(9, 18, 28, .82), rgba(6, 13, 20, .92));
     }
 
     .group-card,
@@ -677,6 +719,44 @@
       max-height:520px;
     }
 
+    .logger-header {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .logger-filter-wrap {
+      display:grid;
+      gap:4px;
+      min-width:260px;
+      flex:1 1 280px;
+    }
+
+    .logger-filter-label {
+      font-size:.62rem;
+      text-transform:uppercase;
+      letter-spacing:.09em;
+      color:#c6d6e3;
+    }
+
+    .logger-filter-input.active {
+      border-color:rgba(35, 199, 182, .72);
+      background:linear-gradient(180deg, rgba(226, 255, 247, .98), rgba(196, 245, 234, .95));
+      box-shadow:
+        0 0 0 2px rgba(35, 199, 182, .16),
+        inset 0 1px 0 rgba(255, 255, 255, .94);
+    }
+
+    .logger-filter-input.invalid {
+      border-color:rgba(255, 127, 157, .88);
+      background:linear-gradient(180deg, rgba(255, 239, 244, .98), rgba(255, 220, 229, .95));
+      box-shadow:
+        0 0 0 2px rgba(255, 127, 157, .2),
+        inset 0 1px 0 rgba(255, 255, 255, .94);
+    }
+
     pre {
       margin:0;
       flex:1;
@@ -748,7 +828,8 @@
     @media (max-width: 1520px) {
       .dashboard-header,
       .operational-layout,
-      .lifecycle-layout {
+      .lifecycle-layout,
+      .low-level-layout {
         grid-template-columns:1fr;
       }
 
@@ -795,6 +876,10 @@
         min-height:520px;
         max-height:none;
       }
+
+      .delay-plot-canvas {
+        height:280px;
+      }
     }
   </style>
 </head>
@@ -840,7 +925,9 @@
           <div class="hero-actions">
             <button id="navOperational" type="button">Operational</button>
             <button id="navLifecycle" type="button" class="secondary">Lifecycle</button>
-            <button id="navImportantData" type="button" class="secondary">Important Data</button>
+            <button id="navImportantData" type="button" class="secondary">TELEMETRY &amp; INFO</button>
+            <button id="navLowLevelLog" type="button" class="secondary">WiFi Controller low-level LOG</button>
+            <button id="navDelayPlot" type="button" class="secondary">SERVER/CLIENT DELAY</button>
           </div>
         </div>
         <div class="meta-strip">
@@ -1005,6 +1092,10 @@
                     <div class="section-kicker">Logger</div>
                     <h3 class="section-title">Runtime Event Stream</h3>
                   </div>
+                  <label class="logger-filter-wrap">
+                    <span class="logger-filter-label">Regex Filter</span>
+                    <input id="loggerFilterInput" class="logger-filter-input" type="text" maxlength="100" placeholder="Example: timeout|retry">
+                  </label>
                   <div class="log-status">
                     <div id="loggerModePill" class="status-chip ok">Logger Live</div>
                     <button id="loggerToggleButton" type="button" class="logger-button">Pause Logger</button>
@@ -1020,7 +1111,7 @@
           <div class="window-bar">
             <div>
               <div class="eyebrow">Screen 3</div>
-              <h2 class="window-title">Important Data</h2>
+              <h2 class="window-title">TELEMETRY &amp; INFO</h2>
             </div>
             <div class="status-inline">
               <div class="status-chip ok">Snapshot Refresh 1s</div>
@@ -1034,9 +1125,97 @@
                   <h3 class="section-title">High-Signal Runtime Data</h3>
                   <p class="section-copy">Operator-facing summary of the simulator data model, transport values, and live control context.</p>
                 </div>
+                <div class="telemetry-actions">
+                  <button id="zeroMaxDelayButton" type="button">ZERO MAX DELAY VALUE</button>
+                  <button id="totalErrorsButton" type="button">Total Errors = 0</button>
+                </div>
               </div>
               <div id="importantData" class="data-grid"></div>
             </section>
+          </div>
+        </section>
+
+        <section id="windowLowLevelLog" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 4</div>
+              <h2 class="window-title">WiFi Controller low-level LOG</h2>
+            </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Buffered to Latest 2000 Lines</div>
+            </div>
+          </div>
+          <div class="window-content">
+            <div class="low-level-layout">
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Low-Level Visibility</div>
+                    <h3 class="section-title">ESP Controller Raw Transport Logger</h3>
+                    <p class="section-copy">Dedicated low-level stream for Wi-Fi controller transport diagnostics in parallel with simulator runtime logs.</p>
+                  </div>
+                </div>
+                <div class="group-card">
+                  <div class="section-header">
+                    <div>
+                      <div class="section-kicker">Capture Rules</div>
+                      <h3 class="section-title">Buffered and Regex-Filterable Stream</h3>
+                    </div>
+                  </div>
+                  <div class="section-copy">Includes serial transport manager events and framed RX/TX telemetry from the ESP-side bridge path.</div>
+                  <div class="section-copy">Buffer policy: newest-first rolling history with a maximum of 2000 lines.</div>
+                </div>
+              </section>
+
+              <section class="panel stack logger-panel">
+                <div class="logger-header">
+                  <div>
+                    <div class="section-kicker">Logger</div>
+                    <h3 class="section-title">WiFi Controller Low-Level Event Stream</h3>
+                  </div>
+                  <label class="logger-filter-wrap">
+                    <span class="logger-filter-label">Regex Filter</span>
+                    <input id="lowLevelLoggerFilterInput" class="logger-filter-input" type="text" maxlength="100" placeholder="Example: RX|timeout|retry">
+                  </label>
+                  <div class="log-status">
+                    <div id="lowLevelLoggerModePill" class="status-chip ok">Logger Live</div>
+                    <button id="lowLevelLoggerToggleButton" type="button" class="logger-button">Pause Logger</button>
+                  </div>
+                </div>
+                <pre id="lowLevelLogWindow">Loading low-level log snapshot...</pre>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="windowDelayPlot" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 5</div>
+              <h2 class="window-title">SERVER/CLIENT DELAY</h2>
+            </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Plot Refresh 200ms</div>
+              <div class="status-chip ok">Rolling Window 10s</div>
+            </div>
+          </div>
+          <div class="window-content">
+            <div class="delay-layout">
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Delay Plot</div>
+                    <h3 class="section-title">Sequential Message Delay Trend</h3>
+                    <p class="section-copy">the next plot presents the delay between sequencial messages either from server to client and client to server.</p>
+                  </div>
+                </div>
+                <div class="delay-plot-summary">
+                  <span id="delayPlotLatestLabel">Latest Delay: 0 mS</span>
+                  <span id="delayPlotMaxLabel">Window Max: 0 mS</span>
+                </div>
+                <canvas id="delayPlotCanvas" class="delay-plot-canvas"></canvas>
+              </section>
+            </div>
           </div>
         </section>
       </div>
@@ -1060,13 +1239,20 @@
       wifiToggleButton: document.getElementById('wifiToggleButton'),
       resetButton: document.getElementById('resetButton'),
       loggerToggleButton: document.getElementById('loggerToggleButton'),
+      loggerFilterInput: document.getElementById('loggerFilterInput'),
       navOperational: document.getElementById('navOperational'),
       navLifecycle: document.getElementById('navLifecycle'),
       navImportantData: document.getElementById('navImportantData'),
+      navLowLevelLog: document.getElementById('navLowLevelLog'),
+      navDelayPlot: document.getElementById('navDelayPlot'),
+      zeroMaxDelayButton: document.getElementById('zeroMaxDelayButton'),
+      totalErrorsButton: document.getElementById('totalErrorsButton'),
       dashboardHeader: document.querySelector('.dashboard-header'),
       windowOperational: document.getElementById('windowOperational'),
       windowLifecycle: document.getElementById('windowLifecycle'),
       windowImportantData: document.getElementById('windowImportantData'),
+      windowLowLevelLog: document.getElementById('windowLowLevelLog'),
+      windowDelayPlot: document.getElementById('windowDelayPlot'),
       workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
       serverConnectionInteger: document.getElementById('serverConnectionInteger'),
@@ -1074,6 +1260,12 @@
       receivedClientText: document.getElementById('receivedClientText'),
       importantData: document.getElementById('importantData'),
       logWindow: document.getElementById('logWindow'),
+      lowLevelLogWindow: document.getElementById('lowLevelLogWindow'),
+      lowLevelLoggerToggleButton: document.getElementById('lowLevelLoggerToggleButton'),
+      lowLevelLoggerFilterInput: document.getElementById('lowLevelLoggerFilterInput'),
+      delayPlotCanvas: document.getElementById('delayPlotCanvas'),
+      delayPlotLatestLabel: document.getElementById('delayPlotLatestLabel'),
+      delayPlotMaxLabel: document.getElementById('delayPlotMaxLabel'),
       flash: document.getElementById('flash'),
       splashOverlay: document.getElementById('splashOverlay'),
       splashAppName: document.getElementById('splashAppName'),
@@ -1088,13 +1280,36 @@
       statusLogger: document.getElementById('statusLogger'),
       statusHealth: document.getElementById('statusHealth'),
       loggerModePill: document.getElementById('loggerModePill'),
+      lowLevelLoggerModePill: document.getElementById('lowLevelLoggerModePill'),
     };
 
     let latestLogs = [];
+    let latestLowLevelLogs = [];
     let loggerPaused = false;
+    let loggerFilterPattern = '';
+    let loggerFilterRegex = null;
+    let loggerFilterError = '';
+    let lowLevelLoggerPaused = false;
+    let lowLevelLoggerFilterPattern = '';
+    let lowLevelLoggerFilterRegex = null;
+    let lowLevelLoggerFilterError = '';
+    const delayPlotWindowMs = 10_000;
+    const delayPlotFastRefreshMs = 200;
+    let delayPlotSamples = [];
+    let activeWindowName = 'operational';
+    let delayPlotFastRefreshInFlight = false;
     let stateVisuals = {};
+    const stateDisplayNames = {
+      reset: 'Reset',
+      initialize: 'Initialize',
+      connect: 'Connect',
+      keepalive_server_send: 'KeepAliveServerSend',
+      keepalive_client_return: 'KeepAliveClientReturn',
+      disconnect: 'Disconnect',
+      error: 'Error',
+    };
     let configSyncTimer = null;
-    const asyncButtons = ['openButton', 'closeButton', 'releaseComButton', 'applyConfigButton', 'wifiToggleButton', 'resetButton'];
+    const asyncButtons = ['openButton', 'closeButton', 'releaseComButton', 'applyConfigButton', 'wifiToggleButton', 'resetButton', 'zeroMaxDelayButton', 'totalErrorsButton'];
     const commandStateMap = {
       resetButton: 'reset',
     };
@@ -1165,7 +1380,11 @@
     }
 
     function snapshotHasBlockingFault(snapshot) {
-      return Boolean(snapshot.connection_fault || snapshot.current_state === 'wait_for_com_reset');
+      return Boolean(snapshot.connection_fault || snapshot.current_state === 'error');
+    }
+
+    function formatStateLabel(stateName) {
+      return stateDisplayNames[stateName] || stateName.replaceAll('_', ' ');
     }
 
     function setFlashFromSnapshot(snapshot, fallback = 'Updated.') {
@@ -1178,6 +1397,124 @@
       elements.loggerToggleButton.textContent = loggerPaused ? 'Resume Logger' : 'Pause Logger';
       setChipState(elements.loggerModePill, loggerPaused ? 'warn' : 'ok', loggerPaused ? 'Logger Paused' : 'Logger Live');
       setChipState(elements.statusLogger, loggerPaused ? 'warn' : 'ok', loggerPaused ? 'Logger Paused' : 'Logger Live');
+    }
+
+    function syncLowLevelLoggerToggle() {
+      elements.lowLevelLoggerToggleButton.textContent = lowLevelLoggerPaused ? 'Resume Logger' : 'Pause Logger';
+      setChipState(
+        elements.lowLevelLoggerModePill,
+        lowLevelLoggerPaused ? 'warn' : 'ok',
+        lowLevelLoggerPaused ? 'Logger Paused' : 'Logger Live'
+      );
+    }
+
+    function setLoggersPaused(paused, renderOnResume = false) {
+      loggerPaused = paused;
+      lowLevelLoggerPaused = paused;
+      syncLoggerToggle();
+      syncLowLevelLoggerToggle();
+      if (!paused && renderOnResume) {
+        renderLogWindow(true);
+        renderLowLevelLogWindow(true);
+      }
+    }
+
+    function filterLogs(logs) {
+      if (!loggerFilterPattern.trim()) return logs;
+      if (!loggerFilterRegex) return [];
+      return logs.filter((line) => loggerFilterRegex.test(line));
+    }
+
+    function renderLogWindow(force = false) {
+      if (loggerPaused && !force) return;
+      if (loggerFilterError) {
+        elements.logWindow.textContent = `Invalid regex filter: ${loggerFilterError}`;
+        elements.logWindow.scrollTop = 0;
+        return;
+      }
+      const visibleLogs = filterLogs(latestLogs);
+      if (visibleLogs.length) {
+        elements.logWindow.textContent = visibleLogs.join('\n');
+      } else if (loggerFilterPattern.trim()) {
+        elements.logWindow.textContent = `No log lines match regex: ${loggerFilterPattern}`;
+      } else {
+        elements.logWindow.textContent = 'No log lines yet.';
+      }
+      elements.logWindow.scrollTop = 0;
+    }
+
+    function filterLowLevelLogs(logs) {
+      if (!lowLevelLoggerFilterPattern.trim()) return logs;
+      if (!lowLevelLoggerFilterRegex) return [];
+      return logs.filter((line) => lowLevelLoggerFilterRegex.test(line));
+    }
+
+    function renderLowLevelLogWindow(force = false) {
+      if (lowLevelLoggerPaused && !force) return;
+      if (lowLevelLoggerFilterError) {
+        elements.lowLevelLogWindow.textContent = `Invalid regex filter: ${lowLevelLoggerFilterError}`;
+        elements.lowLevelLogWindow.scrollTop = 0;
+        return;
+      }
+      const visibleLogs = filterLowLevelLogs(latestLowLevelLogs);
+      if (visibleLogs.length) {
+        elements.lowLevelLogWindow.textContent = visibleLogs.join('\n');
+      } else if (lowLevelLoggerFilterPattern.trim()) {
+        elements.lowLevelLogWindow.textContent = `No log lines match regex: ${lowLevelLoggerFilterPattern}`;
+      } else {
+        elements.lowLevelLogWindow.textContent = 'No low-level log lines yet.';
+      }
+      elements.lowLevelLogWindow.scrollTop = 0;
+    }
+
+    function updateLoggerFilter() {
+      const clamped = (elements.loggerFilterInput.value || '').slice(0, 100);
+      if (clamped !== elements.loggerFilterInput.value) {
+        elements.loggerFilterInput.value = clamped;
+      }
+
+      loggerFilterPattern = clamped;
+      loggerFilterRegex = null;
+      loggerFilterError = '';
+
+      const hasText = loggerFilterPattern.trim().length > 0;
+      elements.loggerFilterInput.classList.toggle('active', hasText);
+
+      if (hasText) {
+        try {
+          loggerFilterRegex = new RegExp(loggerFilterPattern);
+        } catch (error) {
+          loggerFilterError = error instanceof Error ? error.message : 'Invalid regular expression';
+        }
+      }
+
+      elements.loggerFilterInput.classList.toggle('invalid', Boolean(loggerFilterError));
+      renderLogWindow(true);
+    }
+
+    function updateLowLevelLoggerFilter() {
+      const clamped = (elements.lowLevelLoggerFilterInput.value || '').slice(0, 100);
+      if (clamped !== elements.lowLevelLoggerFilterInput.value) {
+        elements.lowLevelLoggerFilterInput.value = clamped;
+      }
+
+      lowLevelLoggerFilterPattern = clamped;
+      lowLevelLoggerFilterRegex = null;
+      lowLevelLoggerFilterError = '';
+
+      const hasText = lowLevelLoggerFilterPattern.trim().length > 0;
+      elements.lowLevelLoggerFilterInput.classList.toggle('active', hasText);
+
+      if (hasText) {
+        try {
+          lowLevelLoggerFilterRegex = new RegExp(lowLevelLoggerFilterPattern);
+        } catch (error) {
+          lowLevelLoggerFilterError = error instanceof Error ? error.message : 'Invalid regular expression';
+        }
+      }
+
+      elements.lowLevelLoggerFilterInput.classList.toggle('invalid', Boolean(lowLevelLoggerFilterError));
+      renderLowLevelLogWindow(true);
     }
 
     function clearButtonState(button) {
@@ -1219,6 +1556,8 @@
       elements.navOperational.classList.toggle('secondary', mode !== 'operational');
       elements.navLifecycle.classList.toggle('secondary', mode !== 'lifecycle');
       elements.navImportantData.classList.toggle('secondary', mode !== 'important-data');
+      elements.navLowLevelLog.classList.toggle('secondary', mode !== 'low-level-log');
+      elements.navDelayPlot.classList.toggle('secondary', mode !== 'delay-plot');
     }
 
     function getOffsetTopWithinAncestor(node, ancestor) {
@@ -1251,9 +1590,12 @@
     }
 
     function activateWindow(name) {
+      activeWindowName = name;
       elements.windowOperational.classList.toggle('active-window', name === 'operational');
       elements.windowLifecycle.classList.toggle('active-window', name === 'lifecycle');
       elements.windowImportantData.classList.toggle('active-window', name === 'important-data');
+      elements.windowLowLevelLog.classList.toggle('active-window', name === 'low-level-log');
+      elements.windowDelayPlot.classList.toggle('active-window', name === 'delay-plot');
       setNavMode(name);
 
       const target =
@@ -1261,8 +1603,140 @@
           ? elements.windowOperational
           : name === 'lifecycle'
             ? elements.windowLifecycle
-            : elements.windowImportantData;
+            : name === 'important-data'
+              ? elements.windowImportantData
+              : name === 'low-level-log'
+                ? elements.windowLowLevelLog
+                : elements.windowDelayPlot;
       scrollGroupToTop(target);
+    }
+
+    function sampleDelay(snapshot) {
+      const rawValue = Number(snapshot.transport_last_delay_ms ?? 0);
+      const delayValue = Number.isFinite(rawValue) ? rawValue : 0;
+      const nowMs = Date.now();
+      delayPlotSamples.push({ t: nowMs, v: delayValue, invalid: delayValue < 0 });
+      const cutoff = nowMs - delayPlotWindowMs;
+      delayPlotSamples = delayPlotSamples.filter((sample) => sample.t >= cutoff);
+    }
+
+    function formatTickValue(value) {
+      if (value >= 100) return `${Math.round(value)}`;
+      if (value >= 10) return `${value.toFixed(1)}`;
+      return `${value.toFixed(2)}`;
+    }
+
+    function drawDelayPlotFromSamples() {
+      const canvas = elements.delayPlotCanvas;
+      if (!canvas) return;
+
+      const nowMs = Date.now();
+      const cutoffMs = nowMs - delayPlotWindowMs;
+      delayPlotSamples = delayPlotSamples.filter((sample) => sample.t >= cutoffMs);
+
+      const latestValue = delayPlotSamples.length ? delayPlotSamples[delayPlotSamples.length - 1].v : 0;
+      const windowMax = delayPlotSamples.length
+        ? delayPlotSamples.reduce((maxValue, sample) => Math.max(maxValue, sample.v), 0)
+        : 0;
+
+      elements.delayPlotLatestLabel.textContent = `Latest Delay: ${Math.round(latestValue)} mS`;
+      elements.delayPlotMaxLabel.textContent = `Window Max: ${Math.round(windowMax)} mS`;
+
+      const cssWidth = Math.max(canvas.clientWidth || 1, 1);
+      const cssHeight = Math.max(canvas.clientHeight || 1, 1);
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.max(Math.round(cssWidth * dpr), 1);
+      const pixelHeight = Math.max(Math.round(cssHeight * dpr), 1);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      const leftPad = 64;
+      const rightPad = 20;
+      const topPad = 16;
+      const bottomPad = 34;
+      const plotWidth = Math.max(cssWidth - leftPad - rightPad, 1);
+      const plotHeight = Math.max(cssHeight - topPad - bottomPad, 1);
+      const yMax = windowMax > 0 ? windowMax : 1;
+
+      ctx.strokeStyle = 'rgba(151, 180, 201, 0.2)';
+      ctx.fillStyle = 'rgba(198, 219, 234, 0.86)';
+      ctx.font = '11px "Segoe UI", "Arial", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      for (let tick = 0; tick <= 10; tick += 1) {
+        const y = topPad + (tick / 10) * plotHeight;
+        ctx.beginPath();
+        ctx.moveTo(leftPad, y);
+        ctx.lineTo(leftPad + plotWidth, y);
+        ctx.stroke();
+
+        const tickValue = yMax * (1 - tick / 10);
+        ctx.fillText(formatTickValue(tickValue), leftPad - 8, y);
+      }
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      for (let tick = 0; tick <= 10; tick += 1) {
+        const x = leftPad + (tick / 10) * plotWidth;
+        ctx.beginPath();
+        ctx.moveTo(x, topPad);
+        ctx.lineTo(x, topPad + plotHeight);
+        ctx.stroke();
+
+        const secondsAgo = 10 - tick;
+        const xLabel = secondsAgo === 0 ? 'now' : `-${secondsAgo}s`;
+        ctx.fillText(xLabel, x, topPad + plotHeight + 6);
+      }
+
+      const points = delayPlotSamples.map((sample) => {
+        const normalizedX = (sample.t - cutoffMs) / delayPlotWindowMs;
+        const x = leftPad + Math.min(Math.max(normalizedX, 0), 1) * plotWidth;
+        const yRatio = yMax > 0 ? sample.v / yMax : 0;
+        const y = topPad + (1 - Math.min(Math.max(yRatio, 0), 1)) * plotHeight;
+        return { x, y, invalid: Boolean(sample.invalid) };
+      });
+      const hasPath = points.length > 0;
+
+      if (hasPath) {
+        ctx.strokeStyle = 'rgba(245, 163, 94, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.stroke();
+
+        ctx.lineWidth = 1.2;
+        points.forEach((point) => {
+          const isInvalid = point.invalid;
+          ctx.fillStyle = isInvalid ? 'rgba(255, 88, 106, 0.98)' : 'rgba(255, 198, 136, 0.98)';
+          ctx.strokeStyle = isInvalid ? 'rgba(85, 12, 24, 0.98)' : 'rgba(28, 38, 52, 0.95)';
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, isInvalid ? 6.2 : 5.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+      } else {
+        ctx.fillStyle = 'rgba(198, 219, 234, 0.72)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Waiting for delay samples...', leftPad + plotWidth / 2, topPad + plotHeight / 2);
+      }
+    }
+
+    function renderDelayPlot(snapshot) {
+      sampleDelay(snapshot);
+      drawDelayPlotFromSamples();
     }
 
     function renderStates(snapshot) {
@@ -1275,7 +1749,7 @@
         else if (visual === 'progress') className += ' in-progress';
         else if (visual === 'failure') className += ' error-state';
         pill.className = className;
-        pill.textContent = state.replaceAll('_', ' ');
+        pill.textContent = formatStateLabel(state);
         elements.states.appendChild(pill);
       });
     }
@@ -1289,6 +1763,10 @@
         card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`;
         elements.importantData.appendChild(card);
       });
+    }
+
+    function renderTotalErrors(snapshot) {
+      elements.totalErrorsButton.textContent = `Total Errors = ${Number(snapshot.total_error_count ?? 0)}`;
     }
 
     function renderConnectionIntegers(snapshot) {
@@ -1326,12 +1804,13 @@
       renderStates(snapshot);
       renderConnectionIntegers(snapshot);
       renderImportantData(snapshot);
+      renderTotalErrors(snapshot);
+      renderDelayPlot(snapshot);
 
       latestLogs = Array.isArray(snapshot.logs) ? snapshot.logs.slice(0, 2000) : [];
-      if (!loggerPaused) {
-        elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
-        elements.logWindow.scrollTop = 0;
-      }
+      latestLowLevelLogs = Array.isArray(snapshot.low_level_logs) ? snapshot.low_level_logs.slice(0, 2000) : [];
+      renderLogWindow(false);
+      renderLowLevelLogWindow(false);
 
       syncInputValue(elements.serialPort, snapshot.config.serial_port);
       syncInputValue(elements.wifiSsid, snapshot.config.wifi_ssid);
@@ -1353,6 +1832,21 @@
       } catch (error) {
         setChipState(elements.statusHealth, 'danger', 'Backend Error');
         setFlash(error.message, true);
+      }
+    }
+
+    async function refreshDelayPlotFast() {
+      if (activeWindowName !== 'delay-plot') return;
+      if (delayPlotFastRefreshInFlight) return;
+
+      delayPlotFastRefreshInFlight = true;
+      try {
+        const snapshotPayload = await snapshot();
+        renderDelayPlot(snapshotPayload);
+      } catch (error) {
+        /* Keep fast-loop failures non-blocking for the rest of the dashboard. */
+      } finally {
+        delayPlotFastRefreshInFlight = false;
       }
     }
 
@@ -1401,20 +1895,24 @@
     elements.navOperational.addEventListener('click', () => activateWindow('operational'));
     elements.navLifecycle.addEventListener('click', () => activateWindow('lifecycle'));
     elements.navImportantData.addEventListener('click', () => activateWindow('important-data'));
+    elements.navLowLevelLog.addEventListener('click', () => activateWindow('low-level-log'));
+    elements.navDelayPlot.addEventListener('click', () => activateWindow('delay-plot'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
     elements.releaseComButton.addEventListener('click', () => post('/api/transport/release-com', null, elements.releaseComButton));
     elements.applyConfigButton.addEventListener('click', () => post('/api/config', collectConfigPayload(), elements.applyConfigButton));
     elements.wifiToggleButton.addEventListener('click', () => post('/api/transport/toggle-wifi', null, elements.wifiToggleButton));
     elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
+    elements.zeroMaxDelayButton.addEventListener('click', () => post('/api/telemetry/reset-max-delay', null, elements.zeroMaxDelayButton));
+    elements.totalErrorsButton.addEventListener('click', () => post('/api/telemetry/reset-total-errors', null, elements.totalErrorsButton));
     elements.loggerToggleButton.addEventListener('click', () => {
-      loggerPaused = !loggerPaused;
-      syncLoggerToggle();
-      if (!loggerPaused) {
-        elements.logWindow.textContent = latestLogs.length ? latestLogs.join('\n') : 'No log lines yet.';
-        elements.logWindow.scrollTop = 0;
-      }
+      setLoggersPaused(!loggerPaused, true);
     });
+    elements.loggerFilterInput.addEventListener('input', updateLoggerFilter);
+    elements.lowLevelLoggerToggleButton.addEventListener('click', () => {
+      setLoggersPaused(!loggerPaused, true);
+    });
+    elements.lowLevelLoggerFilterInput.addEventListener('input', updateLowLevelLoggerFilter);
     [
       elements.serialPort,
       elements.wifiSsid,
@@ -1429,12 +1927,17 @@
       input.addEventListener('change', scheduleConfigSync);
     });
 
+    window.addEventListener('resize', drawDelayPlotFromSamples);
+
     activateWindow('operational');
-    syncLoggerToggle();
+    setLoggersPaused(false);
+    updateLoggerFilter();
+    updateLowLevelLoggerFilter();
     loadSplashInfo();
     hideSplashAfterTimeout();
     refresh();
     setInterval(refresh, 1000);
+    setInterval(refreshDelayPlotFast, delayPlotFastRefreshMs);
   </script>
 </body>
 </html>
