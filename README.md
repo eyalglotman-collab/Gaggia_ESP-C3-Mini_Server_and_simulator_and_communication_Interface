@@ -152,6 +152,31 @@ cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/sc
 You must run build and flash sequentially, with `build` first and `flash` second.
 For Codex/WSL sessions, this absolute-path `cmd.exe` method is the required build and flash path.
 
+### Claude Code Build Verification (non-interactive shell limitation)
+
+When running inside Claude Code's bash shell, Windows console programs (`idf.py`, `ninja`) write output
+to the Windows console buffer rather than the pipe, so no build output is visible and output capture
+via `2>&1` or PowerShell redirects does not work.
+
+The build command still runs and exits correctly (exit code 0 = success). Verify the build result using
+these two checks instead of looking at idf.py output:
+
+**1. Check the binary exists and has a recent timestamp:**
+```bash
+ls -la .idfbuild/esp32c3_bridge/eyal_espresso_c3_bridge.bin
+```
+
+**2. Confirm no source changes since the last known-good build:**
+```bash
+git diff <last-good-commit> HEAD -- firmware/esp32c3_bridge/main/
+```
+If the diff is empty, the existing binary in `.idfbuild/esp32c3_bridge/` is valid and up to date.
+
+**3. Play the build success sound after confirming a valid binary:**
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\play_build_success_sound.ps1
+```
+
 ## Current Architectural Intent
 
 The server simulator is transport-first, not yet a full espresso-machine domain simulator. The strongest and most complete part of the design today is the low-level link: COM-port ownership, framing, counters, reset/initialize/connect/keepalive sequencing, watchdog handling, and bridge-assisted client connectivity.
