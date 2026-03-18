@@ -156,10 +156,15 @@ For Codex/WSL sessions, this absolute-path `cmd.exe` method is the required buil
 
 When running inside Claude Code's bash shell, Windows console programs (`idf.py`, `ninja`) write output
 to the Windows console buffer rather than the pipe, so no build output is visible and output capture
-via `2>&1` or PowerShell redirects does not work.
+via `2>&1` or PowerShell redirects does not work. If the binary timestamp does not update after running
+the build command, the build did not reach ninja.
 
-The build command still runs and exits correctly (exit code 0 = success). Verify the build result using
-these two checks instead of looking at idf.py output:
+**If the build does not run from Claude Code's shell**, ask Eyal to run it from a real Windows terminal:
+- Open a **CMD window** or the **VS Code integrated terminal**
+- Run: `C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd build`
+- Report back when done — Claude will then verify the binary and play the success sound.
+
+Otherwise verify the build result using these checks instead of looking at idf.py output:
 
 **1. Check the binary exists and has a recent timestamp:**
 ```bash
