@@ -6,6 +6,15 @@
 
 ---
 
+## Branch Context — `release/0.2.0`
+
+- **Managed by**: Claude Code (this branch)
+- **Parallel branch**: Managed by Codex under a separate branch
+- **Objective**: Allow Eyal to progress with either Claude or Codex independently, then compare progress and code quality between the two AI agents.
+- **Rule**: Changes on this branch are authored and committed by Claude. Do not merge Codex-branch changes here without Eyal's explicit review and decision.
+
+---
+
 ## SESSION START PROTOCOL (MANDATORY)
 
 At the start of every new coding session with a fresh context, Claude must:
