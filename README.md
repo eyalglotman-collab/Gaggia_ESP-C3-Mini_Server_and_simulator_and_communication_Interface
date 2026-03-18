@@ -159,11 +159,19 @@ to the Windows console buffer rather than the pipe, so no build output is visibl
 via `2>&1` or PowerShell redirects does not work. If the binary timestamp does not update after running
 the build command, the build did not reach ninja.
 
-**If the build does not run from Claude Code's shell**, use this PowerShell workaround (clears MSYSTEM, uses -NoNewWindow to pipe output):
+**Confirmed working method from Claude Code's shell** (clears MSYSTEM, uses -NoNewWindow to pipe output):
+
+Build:
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd build' -Wait -NoNewWindow -PassThru"
 ```
-If that also fails, ask Eyal to run `idfw.cmd build` from a real CMD or VS Code integrated terminal and report back.
+
+Flash:
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd -p COM4 flash' -Wait -NoNewWindow -PassThru"
+```
+
+If these fail, ask Eyal to run `idfw.cmd build` or `idfw.cmd -p COM4 flash` from a real CMD or VS Code integrated terminal and report back.
 
 Otherwise verify the build result using these checks instead of looking at idf.py output:
 
