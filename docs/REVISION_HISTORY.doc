@@ -2,10 +2,16 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.18\par
-- Summary: Added split keepalive state telemetry alignment, controller-authored delay markers, and enhanced simulator observability tooling.\par
+- Version: 0.1.19\par
+- Summary: Refactored bridge firmware communication runtime into CommunicationFunctions module and preserved behavior through successful build+flash.\par
 \par
 \b X=0, Y=1\b0\par
+\b 2026-03-17 14:49:00\b0\par
+- Version: 0.1.19\par
+- Firmware Version: 0.1.19\par
+- Summary: Extracted ESP32-C3 communication runtime into dedicated CommunicationFunctions module and kept app_main as a thin entry wrapper.\par
+- Notes: Added `firmware/esp32c3_bridge/main/CommunicationFunctions.c` and `CommunicationFunctions.h`, moved the long-running bridge transport loop into `communication_functions_run()`, kept `firmware/esp32c3_bridge/main/bridge_main.c` focused on `app_main()` delegation, and updated the firmware component CMake source list accordingly. Verified with successful `idfw.cmd build` and successful flash to `COM4`.\par
+\par
 \b 2026-03-17 14:52:00\b0\par
 - Version: 0.1.18\par
 - Firmware Version: 0.1.18\par
