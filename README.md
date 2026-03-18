@@ -110,6 +110,19 @@ pip install -r requirements.txt
 
 You must launch the simulator through `scripts/launch_simulator_ui.ps1`.
 
+### Claude Code — Run Simulator ("run sim")
+
+When Eyal says **"run sim"**, Claude must launch `launch_simulator_ui.ps1` asynchronously — fire and forget, do not wait for it to close. The simulator runs as a long-lived background process alongside the session.
+
+**Confirmed working method from Claude Code's shell:**
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\launch_simulator_ui.ps1'"
+```
+
+Key points:
+- No `-Wait` — the script is intentionally launched async and left running.
+- If startup fails, read the terminal block first (`[Simulator Launch Prerequisite Failure]`, `[Simulator Launch Verification Failure]`, or `[Simulator Launch Runtime Failure]`) — terminal output is the source of truth, not the popup.
+
 ## Session Setup And Recovery (Use Every Session)
 
 To avoid repeated missing-package or false-missing popups, use this session startup sequence:
