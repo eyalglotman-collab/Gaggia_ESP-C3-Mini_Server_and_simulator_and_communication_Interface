@@ -36,9 +36,10 @@
 
 #include "CommunicationFunctions.h"
 
-#define BRIDGE_RX_BUFFER_SIZE           512
-#define BRIDGE_TX_BUFFER_SIZE           512
-#define BRIDGE_FRAME_MAX_PAYLOAD        256
+#define BRIDGE_RX_BUFFER_SIZE           1024
+#define BRIDGE_TX_BUFFER_SIZE           1024
+#define BRIDGE_FRAME_MAX_PAYLOAD        600
+#define BRIDGE_TEXT_PAYLOAD_MAX         256
 #define BRIDGE_FRAME_OVERHEAD           17
 #define BRIDGE_FRAME_MAX_SIZE           (BRIDGE_FRAME_MAX_PAYLOAD + BRIDGE_FRAME_OVERHEAD)
 #define BRIDGE_POLL_DELAY_MS            20
@@ -48,7 +49,7 @@
 #define BRIDGE_WIFI_CHANNEL             1
 #define BRIDGE_WIFI_MAX_CONNECTIONS     4
 #define BRIDGE_TCP_PORT                 3333
-#define BRIDGE_TCP_RX_BUFFER_SIZE       512
+#define BRIDGE_TCP_RX_BUFFER_SIZE       1280
 #define BRIDGE_KEEPALIVE_PERIOD_MS      300
 #define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 450
 #define BRIDGE_RUNNING_INTEGER_RETRY_LIMIT 3U
@@ -56,6 +57,9 @@
 
 #define BRIDGE_SOF_BYTE0                0xA5
 #define BRIDGE_SOF_BYTE1                0x5A
+
+#define BRIDGE_DATA_MAGIC_DOWNLINK      0xD0U
+#define BRIDGE_DATA_MAGIC_UPLINK        0xD1U
 
 static const char *TAG = "bridge";
 
@@ -521,7 +525,7 @@ static void bridge_update_transport_last_delay_for_state(bridge_state_t state)
  */
 static void bridge_send_telemetry_update_usb(void)
 {
-    char telemetry_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+    char telemetry_payload[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
 
     snprintf(
         telemetry_payload,
@@ -699,7 +703,7 @@ static void bridge_send_unsolicited_usb_frame(
  */
 static void bridge_notify_realtime_data_halted(const char *reason_text)
 {
-    char payload_text[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+    char payload_text[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
 
     snprintf(payload_text,
              sizeof(payload_text),
@@ -1030,7 +1034,7 @@ static void bridge_notify_usb_fault(const char *payload_text)
 static void bridge_send_server_keepalive(bool reuse_pending_request_id)
 {
     bridge_frame_t synthetic_keepalive = {0};
-    char keepalive_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+    char keepalive_payload[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
     uint32_t request_id = 0U;
 
     if (s_tcp_client_fd < 0 || s_active_session_id == 0U) {
@@ -1211,15 +1215,17 @@ static void bridge_service_transport_watchdog(void)
  */
 static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame_t *frame)
 {
-    char payload_text[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+    char payload_text[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
 
     if (frame == NULL) {
         return;
     }
 
     if (frame->payload_length > 0U) {
-        memcpy(payload_text, frame->payload, frame->payload_length);
-        payload_text[frame->payload_length] = '\0';
+        size_t text_copy_len = (frame->payload_length < BRIDGE_TEXT_PAYLOAD_MAX)
+                               ? frame->payload_length : BRIDGE_TEXT_PAYLOAD_MAX;
+        memcpy(payload_text, frame->payload, text_copy_len);
+        payload_text[text_copy_len] = '\0';
     }
 
     switch (frame->message_type) {
@@ -1278,7 +1284,7 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
     }
     case BRIDGE_MESSAGE_CONNECT:
     {
-        char connect_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+        char connect_payload[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
         bridge_enter_state(BRIDGE_STATE_CONNECT);
         s_server_live_integer = 0U;
         s_client_live_integer = BRIDGE_DEVICE_LIVE_START;
@@ -1428,7 +1434,7 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             s_last_completed_keepalive_request_id = payload_request_id;
             s_running_integer_retry_count = 0U;
             bridge_enter_state(BRIDGE_STATE_KEEPALIVE_SERVER_SEND);
-            char keepalive_status_payload[BRIDGE_FRAME_MAX_PAYLOAD + 1U] = {0};
+            char keepalive_status_payload[BRIDGE_TEXT_PAYLOAD_MAX + 1U] = {0};
             bridge_build_keepalive_payload(
                 keepalive_status_payload,
                 sizeof(keepalive_status_payload),
@@ -1461,6 +1467,18 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             bridge_reset_transport_max_delay();
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "telemetry_reset_max_delay_ack");
             bridge_send_telemetry_update_usb();
+        } else if (transport == BRIDGE_TRANSPORT_USB
+                   && frame->payload_length > 0U
+                   && frame->payload[0] == BRIDGE_DATA_MAGIC_DOWNLINK) {
+            /* Binary downlink packet (server → client): forward transparently to TCP. */
+            bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,
+                                     frame->payload, frame->payload_length);
+        } else if (transport == BRIDGE_TRANSPORT_TCP
+                   && frame->payload_length > 0U
+                   && frame->payload[0] == BRIDGE_DATA_MAGIC_UPLINK) {
+            /* Binary uplink packet (client → server): forward transparently to USB. */
+            bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
+                                     frame->payload, frame->payload_length);
         } else {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
         }
@@ -1630,7 +1648,12 @@ static void bridge_poll_tcp_client(void)
  */
 void communication_functions_run(void)
 {
-    uint8_t rx_buffer[BRIDGE_FRAME_MAX_SIZE] = {0};
+    /* Streaming accumulation buffer for USB serial frames.  Two max-size
+     * frames fit so a large binary frame and a control frame can both be
+     * buffered before the next parse pass. */
+    static uint8_t usb_accum[BRIDGE_FRAME_MAX_SIZE * 2U];
+    static size_t  usb_accum_len = 0U;
+
     esp_err_t init_result = bridge_transport_init();
     s_reset_cycle_started_us = esp_timer_get_time();
 
@@ -1668,26 +1691,70 @@ void communication_functions_run(void)
             bridge_service_transport_watchdog();
         }
 
-        int received = usb_serial_jtag_read_bytes(
-            rx_buffer,
-            sizeof(rx_buffer),
-            pdMS_TO_TICKS(BRIDGE_POLL_DELAY_MS));
-
-        if (received <= 0) {
-            vTaskDelay(pdMS_TO_TICKS(BRIDGE_POLL_DELAY_MS));
-            continue;
+        /* Read new bytes into the accumulation buffer. */
+        size_t space = sizeof(usb_accum) - usb_accum_len;
+        if (space > 0U) {
+            int received = usb_serial_jtag_read_bytes(
+                usb_accum + usb_accum_len,
+                space,
+                pdMS_TO_TICKS(BRIDGE_POLL_DELAY_MS));
+            if (received > 0) {
+                usb_accum_len += (size_t)received;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(BRIDGE_POLL_DELAY_MS));
+            }
         }
 
-        if (received < BRIDGE_FRAME_OVERHEAD) {
-            continue;
-        }
+        /* Drain all complete frames from the accumulation buffer. */
+        while (usb_accum_len >= BRIDGE_FRAME_OVERHEAD) {
+            /* Find SOF marker. */
+            size_t sof_pos = 0U;
+            bool found = false;
+            while (sof_pos + 1U < usb_accum_len) {
+                if (usb_accum[sof_pos]      == BRIDGE_SOF_BYTE0 &&
+                    usb_accum[sof_pos + 1U] == BRIDGE_SOF_BYTE1) {
+                    found = true;
+                    break;
+                }
+                sof_pos++;
+            }
+            if (!found) {
+                /* Keep the last byte in case it is the first SOF byte. */
+                usb_accum[0] = usb_accum[usb_accum_len - 1U];
+                usb_accum_len = 1U;
+                break;
+            }
+            if (sof_pos > 0U) {
+                usb_accum_len -= sof_pos;
+                memmove(usb_accum, usb_accum + sof_pos, usb_accum_len);
+            }
+            if (usb_accum_len < BRIDGE_FRAME_OVERHEAD) {
+                break; /* Need more bytes. */
+            }
 
-        bridge_frame_t frame = {0};
-        esp_err_t parse_result = bridge_parse_frame(rx_buffer, (size_t)received, &frame);
-        if (parse_result != ESP_OK) {
-            continue;
-        }
+            uint16_t payload_len = (uint16_t)(usb_accum[3] | ((uint16_t)usb_accum[4] << 8));
+            size_t   frame_len   = BRIDGE_FRAME_OVERHEAD + (size_t)payload_len;
 
-        bridge_handle_frame(BRIDGE_TRANSPORT_USB, &frame);
+            if (payload_len > BRIDGE_FRAME_MAX_PAYLOAD) {
+                /* Oversized frame: skip past the SOF and resync. */
+                usb_accum_len--;
+                memmove(usb_accum, usb_accum + 1U, usb_accum_len);
+                continue;
+            }
+            if (usb_accum_len < frame_len) {
+                break; /* Incomplete frame: wait for more bytes. */
+            }
+
+            bridge_frame_t frame = {0};
+            esp_err_t parse_result = bridge_parse_frame(usb_accum, frame_len, &frame);
+
+            /* Consume the frame bytes regardless of parse outcome. */
+            usb_accum_len -= frame_len;
+            memmove(usb_accum, usb_accum + frame_len, usb_accum_len);
+
+            if (parse_result == ESP_OK) {
+                bridge_handle_frame(BRIDGE_TRANSPORT_USB, &frame);
+            }
+        }
     }
 }
