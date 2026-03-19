@@ -719,6 +719,38 @@
       max-height:520px;
     }
 
+    .telemetry-table {
+      display: table;
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .telemetry-row {
+      display: table-row;
+    }
+
+    .telemetry-row:nth-child(even) {
+      background: rgba(151, 180, 201, 0.07);
+    }
+
+    .telemetry-cell-name {
+      display: table-cell;
+      padding: 6px 14px;
+      color: var(--text-secondary, #97b4c9);
+      font-size: 13px;
+      width: 50%;
+      vertical-align: middle;
+    }
+
+    .telemetry-cell-value {
+      display: table-cell;
+      padding: 6px 14px;
+      color: var(--text-primary, #e8f1f8);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      vertical-align: middle;
+    }
+
     .logger-header {
       display:flex;
       align-items:flex-start;
@@ -1132,6 +1164,19 @@
               </div>
               <div id="importantData" class="data-grid"></div>
             </section>
+            <section class="panel stack">
+              <div class="section-header">
+                <div>
+                  <div class="section-kicker">Enhanced Telemetry</div>
+                  <h3 class="section-title">Live Counters and Timing</h3>
+                  <p class="section-copy">Session uptime, keepalive counts, delay statistics, packet loss estimate, and serial frame counters.</p>
+                </div>
+                <div class="status-inline">
+                  <div class="status-chip ok">Refresh 333ms</div>
+                </div>
+              </div>
+              <div id="telemetryTable" class="telemetry-table"></div>
+            </section>
           </div>
         </section>
 
@@ -1259,6 +1304,7 @@
       clientConnectionInteger: document.getElementById('clientConnectionInteger'),
       receivedClientText: document.getElementById('receivedClientText'),
       importantData: document.getElementById('importantData'),
+      telemetryTable: document.getElementById('telemetryTable'),
       logWindow: document.getElementById('logWindow'),
       lowLevelLogWindow: document.getElementById('lowLevelLogWindow'),
       lowLevelLoggerToggleButton: document.getElementById('lowLevelLoggerToggleButton'),
@@ -1765,6 +1811,18 @@
       });
     }
 
+    function renderTelemetryTable(snapshot) {
+      const data = snapshot.telemetry_data || {};
+      const container = elements.telemetryTable;
+      container.innerHTML = '';
+      Object.entries(data).forEach(([key, value]) => {
+        const row = document.createElement('div');
+        row.className = 'telemetry-row';
+        row.innerHTML = `<div class="telemetry-cell-name">${key}</div><div class="telemetry-cell-value">${value}</div>`;
+        container.appendChild(row);
+      });
+    }
+
     function renderTotalErrors(snapshot) {
       elements.totalErrorsButton.textContent = `Total Errors = ${Number(snapshot.total_error_count ?? 0)}`;
     }
@@ -1832,6 +1890,20 @@
       } catch (error) {
         setChipState(elements.statusHealth, 'danger', 'Backend Error');
         setFlash(error.message, true);
+      }
+    }
+
+    let telemetryFastRefreshInFlight = false;
+    async function refreshTelemetryFast() {
+      if (activeWindowName !== 'important-data') return;
+      if (telemetryFastRefreshInFlight) return;
+      telemetryFastRefreshInFlight = true;
+      try {
+        renderTelemetryTable(await snapshot());
+      } catch (_e) {
+        /* Non-blocking: keep fast-loop failures silent. */
+      } finally {
+        telemetryFastRefreshInFlight = false;
       }
     }
 
@@ -1937,6 +2009,7 @@
     hideSplashAfterTimeout();
     refresh();
     setInterval(refresh, 1000);
+    setInterval(refreshTelemetryFast, 333);
     setInterval(refreshDelayPlotFast, delayPlotFastRefreshMs);
   </script>
 </body>

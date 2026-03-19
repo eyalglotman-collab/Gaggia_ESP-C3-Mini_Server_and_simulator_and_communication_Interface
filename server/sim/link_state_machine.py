@@ -86,6 +86,7 @@ class LinkSnapshot:
     total_error_count: int
     last_error: str
     important_data: dict[str, str]
+    telemetry_data: dict[str, str]
     transport: dict[str, object]
     logs: list[str]
     low_level_logs: list[str]
@@ -138,6 +139,15 @@ class LinkRuntime:
         self._initialize_completed = False
         self._connect_completed = False
         self._last_received_client_text = "No client text received yet."
+        # --- Enhanced telemetry counters ---
+        self._session_started_at: datetime | None = None
+        self._keepalive_req_count: int = 0
+        self._keepalive_resp_count: int = 0
+        self._data_frames_rx_count: int = 0
+        self._data_frames_tx_count: int = 0
+        self._transport_min_delay_ms: int = 0
+        self._ka_timing_valid: bool = False
+        self._watchdog_timeout_count: int = 0
         self._append_log("Transport runtime ready. Default TopLayer state is reset.")
 
     def _timestamp(self) -> str:
@@ -233,6 +243,10 @@ class LinkRuntime:
 
         if delay_last is not None:
             self._transport_last_delay_ms = delay_last
+            if delay_last >= 0:
+                if not self._ka_timing_valid or delay_last < self._transport_min_delay_ms:
+                    self._transport_min_delay_ms = delay_last
+                self._ka_timing_valid = True
         if delay_max is not None:
             self._transport_max_delay_ms = delay_max
         if delay_last is None and delay_max is None and payload_text.startswith("ka_"):
@@ -596,6 +610,9 @@ class LinkRuntime:
                             )
                             continue
 
+                        self._keepalive_req_count += 1
+                        if self._session_started_at is None:
+                            self._session_started_at = now_utc
                         self._running_integer_seeded = True
                         self._server_live_integer = frame.host_live_integer
                         self._client_live_integer = frame.host_live_integer + 1
@@ -623,6 +640,7 @@ class LinkRuntime:
                             )
                             continue
 
+                        self._keepalive_resp_count += 1
                         self._running_integer_seeded = True
                         self._server_live_integer = frame.host_live_integer
                         self._client_live_integer = frame.device_live_integer
@@ -641,6 +659,7 @@ class LinkRuntime:
                         continue
 
                 if frame.message_type is MessageType.DATA:
+                    self._data_frames_rx_count += 1
                     self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
                     continue
 
@@ -739,6 +758,7 @@ class LinkRuntime:
         if datetime.now(UTC) - self._last_running_integer_rx_at <= timedelta(milliseconds=RUNNING_INTEGER_TIMEOUT_MS):
             return
 
+        self._watchdog_timeout_count += 1
         self._append_log(
             "Monitor note: KeepAliveClientReturn exceeded timeout window; waiting for bridge retry handling."
         )
@@ -753,6 +773,8 @@ class LinkRuntime:
             payload=payload_text.encode("utf-8"),
         )
         serial_link_manager.send_frame(frame)
+        if message_type is MessageType.DATA:
+            self._data_frames_tx_count += 1
         self._append_log(f"Sent {message_type.name} seq={frame.sequence} server={frame.host_live_integer}.")
 
     def _sync_bridge_wifi_state_locked(self) -> None:
@@ -956,6 +978,14 @@ class LinkRuntime:
             self._top_layer_failure_count = 0
             self._top_layer_connect_streak = 0
             self._last_peer_sequence = None
+            self._session_started_at = None
+            self._keepalive_req_count = 0
+            self._keepalive_resp_count = 0
+            self._data_frames_rx_count = 0
+            self._data_frames_tx_count = 0
+            self._transport_min_delay_ms = 0
+            self._ka_timing_valid = False
+            self._watchdog_timeout_count = 0
             self._set_state(LinkState.RESET, "Server reset issued. Transmission stopped and buffers cleared.")
             if not self._try_send_command_locked(
                 MessageType.RESET,
@@ -1108,6 +1138,37 @@ class LinkRuntime:
             "Last TX": transport_snapshot.last_tx_at,
             "Last Error": self._last_error or transport_snapshot.last_error or "None",
         }
+        # --- Compute enhanced telemetry_data ---
+        if self._session_started_at is not None:
+            elapsed = datetime.now(UTC) - self._session_started_at
+            total_s = int(elapsed.total_seconds())
+            h, rem = divmod(total_s, 3600)
+            m, s = divmod(rem, 60)
+            session_uptime = f"{h:02d}:{m:02d}:{s:02d}"
+        else:
+            session_uptime = "No session"
+        jitter_ms = (self._transport_max_delay_ms - self._transport_min_delay_ms) if self._ka_timing_valid else 0
+        total_ka = self._keepalive_req_count + self._bottom_layer_sequence_error_count
+        if total_ka > 0:
+            loss_x10 = (self._bottom_layer_sequence_error_count * 1000) // total_ka
+            pkt_loss = f"{loss_x10 // 10}.{loss_x10 % 10}%"
+        else:
+            pkt_loss = "0.0%"
+        telemetry_data = {
+            "Session Uptime": session_uptime,
+            "Keepalive REQ Received": str(self._keepalive_req_count),
+            "Keepalive RESP Received": str(self._keepalive_resp_count),
+            "Data Frames RX": str(self._data_frames_rx_count),
+            "Data Frames TX": str(self._data_frames_tx_count),
+            "Transport Min Delay [mS]": str(self._transport_min_delay_ms),
+            "Transport Jitter [mS]": str(jitter_ms),
+            "Watchdog Timeouts": str(self._watchdog_timeout_count),
+            "Packet Loss (est.)": pkt_loss,
+            "Serial TX Frames": str(transport_snapshot.tx_frames),
+            "Serial RX Frames": str(transport_snapshot.rx_frames),
+            "Serial TX Bytes": str(transport_snapshot.tx_bytes),
+            "Serial RX Bytes": str(transport_snapshot.rx_bytes),
+        }
         return LinkSnapshot(
             current_state=self._current_state.value,
             serial_port=self._config.serial_port,
@@ -1130,6 +1191,7 @@ class LinkRuntime:
             total_error_count=self._total_error_count,
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
+            telemetry_data=telemetry_data,
             transport=asdict(transport_snapshot),
             logs=self._combined_logs_locked(),
             low_level_logs=serial_link_manager.get_logs()[:2000],
