@@ -11,6 +11,7 @@ from traceback import format_exception_only
 
 from server.transport.frame_codec import Frame, MessageType
 from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
+from server.sim.data_payload import DATA_MAGIC_UPLINK, data_payload_manager
 
 WATCHDOG_MS = 100
 WATCHDOG_GRACE_MS = 400
@@ -660,7 +661,13 @@ class LinkRuntime:
 
                 if frame.message_type is MessageType.DATA:
                     self._data_frames_rx_count += 1
-                    self._last_received_client_text = frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
+                    if frame.payload and frame.payload[0] == DATA_MAGIC_UPLINK:
+                        # Binary uplink data packet — route to FIFO for app consumption.
+                        data_payload_manager.receive_uplink(bytes(frame.payload))
+                    else:
+                        self._last_received_client_text = (
+                            frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
+                        )
                     continue
 
             if payload_text == "connect_ack":
@@ -777,6 +784,30 @@ class LinkRuntime:
             self._data_frames_tx_count += 1
         self._append_log(f"Sent {message_type.name} seq={frame.sequence} server={frame.host_live_integer}.")
 
+    def _send_binary_locked(self, message_type: MessageType, payload: bytes) -> None:
+        """@brief Send one frame with a raw binary payload.
+
+        @details Used by the data payload channel which carries packed structs
+        rather than UTF-8 text.  Increments the DATA TX counter when the
+        message type is DATA.
+
+        @param message_type Frame type.
+        @param payload      Raw bytes for the payload field.
+        """
+        frame = Frame(
+            message_type=message_type,
+            host_live_integer=self._server_live_integer,
+            device_live_integer=self._client_live_integer,
+            sequence=self._next_sequence(),
+            payload=payload,
+        )
+        serial_link_manager.send_frame(frame)
+        if message_type is MessageType.DATA:
+            self._data_frames_tx_count += 1
+        self._append_log(
+            f"Sent {message_type.name} (binary {len(payload)}B) seq={frame.sequence} server={frame.host_live_integer}."
+        )
+
     def _sync_bridge_wifi_state_locked(self) -> None:
         """@brief Push the simulator Wi-Fi state down to the ESP32-C3 bridge.
 
@@ -882,9 +913,11 @@ class LinkRuntime:
             self._append_log("Serial transport opened. Forcing clean bridge reset before accepting transport traffic.")
 
         serial_link_manager.clear_buffers()
+        data_payload_manager.start(self.send_downlink_data_packet)
         return self.reset()
 
     def close_transport(self) -> LinkSnapshot:
+        data_payload_manager.stop()
         with self._lock:
             serial_link_manager.close_port()
             self._clear_runtime_flow_locked()
@@ -1058,6 +1091,26 @@ class LinkRuntime:
             self._set_state(self._current_state, "Send-data command issued during keepalive.")
             return self._snapshot_locked()
 
+    def send_downlink_data_packet(self, payload: bytes) -> None:
+        """@brief Send one binary downlink data packet if the session is active.
+
+        @details Called from the data_payload background thread every 100 ms.
+        The call is a no-op when the runtime is outside the keepalive states
+        so no error is raised and the packet is silently dropped.
+
+        @param payload Packed bytes from ``data_payload.encode_downlink()``.
+        """
+        with self._lock:
+            if self._current_state not in (
+                LinkState.KEEPALIVE_SERVER_SEND,
+                LinkState.KEEPALIVE_CLIENT_RETURN,
+            ):
+                return
+            try:
+                self._send_binary_locked(MessageType.DATA, payload)
+            except RuntimeError:
+                pass  # serial port not available; drop silently
+
     def reset_total_errors(self) -> LinkSnapshot:
         """@brief Reset the aggregate telemetry error counter to zero."""
 
@@ -1154,6 +1207,7 @@ class LinkRuntime:
             pkt_loss = f"{loss_x10 // 10}.{loss_x10 % 10}%"
         else:
             pkt_loss = "0.0%"
+        dp_stats = data_payload_manager.get_stats()
         telemetry_data = {
             "Session Uptime": session_uptime,
             "Keepalive REQ Received": str(self._keepalive_req_count),
@@ -1168,6 +1222,12 @@ class LinkRuntime:
             "Serial RX Frames": str(transport_snapshot.rx_frames),
             "Serial TX Bytes": str(transport_snapshot.tx_bytes),
             "Serial RX Bytes": str(transport_snapshot.rx_bytes),
+            "DL Packets Sent": str(dp_stats["dl_tx_count"]),
+            "DL Sequence": str(dp_stats["dl_seq"]),
+            "UL Packets Received": str(dp_stats["ul_rx_count"]),
+            "UL Packets Dropped": str(dp_stats["ul_drop_count"]),
+            "UL FIFO Depth": str(dp_stats["ul_fifo_depth"]),
+            "Last UL Seq": str(dp_stats["last_ul_seq"]),
         }
         return LinkSnapshot(
             current_state=self._current_state.value,
