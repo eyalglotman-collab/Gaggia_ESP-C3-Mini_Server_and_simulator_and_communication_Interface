@@ -19,6 +19,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# @brief Release the COM port held by the simulator before flash or monitor.
+# @details POSTs to the simulator HTTP API to force-release the serial link.
+# All errors are suppressed so the command proceeds even when the sim is not running.
+function Invoke-SimulatorComRelease {
+    try {
+        Invoke-WebRequest -Uri 'http://localhost:8000/api/transport/release-com' `
+            -Method Post -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+    } catch { }
+    Start-Sleep -Milliseconds 500
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $FirmwareRoot = Join-Path $RepoRoot "firmware\esp32c3_bridge"
 $BuildDir = Join-Path $RepoRoot ".idfbuild\esp32c3_bridge"
@@ -49,6 +60,11 @@ if (-not ($IdfArgs -contains "-DIDF_TARGET=esp32c3")) {
 }
 
 $EffectiveArgs += $IdfArgs
+
+if (($IdfArgs -contains 'flash') -or ($IdfArgs -contains 'monitor')) {
+    Write-Host "Releasing COM port before $( if ($IdfArgs -contains 'flash') { 'flash' } else { 'monitor' } )..."
+    Invoke-SimulatorComRelease
+}
 
 idf.py @EffectiveArgs
 exit $LASTEXITCODE

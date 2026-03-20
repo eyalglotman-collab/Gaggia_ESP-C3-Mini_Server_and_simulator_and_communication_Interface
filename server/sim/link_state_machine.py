@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -419,6 +420,8 @@ class LinkRuntime:
         unexpected runtime exception occurs inside a transport action.
         """
 
+        print(f"\n[link-runtime] INTERNAL FAILURE in {context}: {exc}", flush=True)
+        traceback.print_exc()
         with self._lock:
             detail = "".join(format_exception_only(type(exc), exc)).strip()
             self._last_monitor_event = f"fail-safe: {context}"
@@ -748,6 +751,23 @@ class LinkRuntime:
                 )
                 continue
 
+    def _check_port_alive_locked(self) -> None:
+        """@brief Detect unexpected serial port closure and route to error state.
+
+        @details The serial reader thread detaches the port handle after a read
+        failure (e.g. USB glitch, bridge watchdog reset) without informing the
+        state machine directly.  This helper is polled on every snapshot so the
+        machine transitions to ERROR as soon as the closure is observed rather
+        than staying stuck in an active state indefinitely with silent data drops.
+        Skip the check in RESET, ERROR, and DISCONNECT — those states either do
+        not expect the port to be open or have already handled the fault.
+        """
+
+        if self._current_state in (LinkState.RESET, LinkState.ERROR, LinkState.DISCONNECT):
+            return
+        if not serial_link_manager.get_snapshot().port_open:
+            self._set_runtime_fault_locked("Serial port disconnected unexpectedly.")
+
     def _enforce_running_integer_timeout_locked(self) -> None:
         """@brief Note prolonged wait time in KeepAliveClientReturn.
 
@@ -922,19 +942,22 @@ class LinkRuntime:
             serial_link_manager.close_port()
             self._clear_runtime_flow_locked()
             self._bridge_ready = False
+            self._wifi_ready = False
             self._wifi_connected = False
             self._tcp_connected = False
-            self._append_log("Serial transport closed.")
+            self._set_state(LinkState.RESET, "Serial transport closed.")
             return self._snapshot_locked()
 
     def force_release_transport(self) -> LinkSnapshot:
         """@brief Force-release the configured COM port from all likely holders.
 
-        @details Closes the simulator-owned handle first, then hard-stops
-        external processes that match the configured COM port and known serial
-        tooling patterns.
+        @details Stops the data payload background thread first (must happen
+        outside the lock to avoid a deadlock with the send callback), closes
+        the simulator-owned handle, then hard-stops external processes that
+        match the configured COM port and known serial tooling patterns.
         """
 
+        data_payload_manager.stop()
         with self._lock:
             snapshot, released_pids = serial_link_manager.force_release_port()
             self._clear_runtime_flow_locked()
@@ -1100,16 +1123,20 @@ class LinkRuntime:
 
         @param payload Packed bytes from ``data_payload.encode_downlink()``.
         """
-        with self._lock:
-            if self._current_state not in (
-                LinkState.KEEPALIVE_SERVER_SEND,
-                LinkState.KEEPALIVE_CLIENT_RETURN,
-            ):
-                return
-            try:
-                self._send_binary_locked(MessageType.DATA, payload)
-            except RuntimeError:
-                pass  # serial port not available; drop silently
+        try:
+            with self._lock:
+                if self._current_state not in (
+                    LinkState.KEEPALIVE_SERVER_SEND,
+                    LinkState.KEEPALIVE_CLIENT_RETURN,
+                ):
+                    return
+                try:
+                    self._send_binary_locked(MessageType.DATA, payload)
+                except RuntimeError:
+                    pass  # serial port not available; drop silently
+        except Exception as exc:
+            print(f"\n[link-runtime] UNHANDLED CRASH in send_downlink_data_packet: {exc}", flush=True)
+            traceback.print_exc()
 
     def reset_total_errors(self) -> LinkSnapshot:
         """@brief Reset the aggregate telemetry error counter to zero."""
@@ -1147,6 +1174,7 @@ class LinkRuntime:
     def get_snapshot(self) -> LinkSnapshot:
         with self._lock:
             self._poll_received_frames_locked()
+            self._check_port_alive_locked()
             self._enforce_running_integer_timeout_locked()
             self._advance_automatic_flow_locked()
             return self._snapshot_locked()

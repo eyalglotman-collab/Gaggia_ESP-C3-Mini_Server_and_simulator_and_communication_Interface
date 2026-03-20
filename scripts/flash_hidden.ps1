@@ -6,6 +6,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# @brief Release the COM port held by the simulator before flashing.
+# @details POSTs to the simulator HTTP API to force-release the serial link.
+# All errors are suppressed so flash proceeds even when the sim is not running.
+function Invoke-SimulatorComRelease {
+    try {
+        Invoke-WebRequest -Uri 'http://localhost:8000/api/transport/release-com' `
+            -Method Post -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+    } catch { }
+    Start-Sleep -Milliseconds 500
+}
+
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $BuildDir = Join-Path $ProjectRoot ".idfbuild\esp32c3_bridge"
 $OutLog = Join-Path $BuildDir "bg_flash.out.log"
@@ -17,21 +28,24 @@ New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 if (Test-Path $OutLog) { Remove-Item $OutLog -Force }
 if (Test-Path $ErrLog) { Remove-Item $ErrLog -Force }
 
-$args = @(
+Write-Host "Releasing COM port before flash..."
+Invoke-SimulatorComRelease
+
+$flashArgs = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", $IdfwScript
 )
 
 if ($BuildFirst) {
-    $args += "build"
+    $flashArgs += "build"
 }
 
-$args += @("-p", $Port, "flash")
+$flashArgs += @("-p", $Port, "flash")
 
 $proc = Start-Process -FilePath "powershell.exe" `
     -WindowStyle Hidden `
-    -ArgumentList $args `
+    -ArgumentList $flashArgs `
     -RedirectStandardOutput $OutLog `
     -RedirectStandardError $ErrLog `
     -PassThru `

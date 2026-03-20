@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import struct
 import time
+import traceback
 from collections import deque
 from threading import Event, Lock, Thread
 from typing import Callable, Optional
@@ -46,7 +47,7 @@ _UL_FMT: str = f"<BII{DATA_SIZE_FLOATS}f{DATA_SIZE_INT}i{DATA_SIZE_STRING}s"
 DOWNLINK_PACKET_SIZE: int = struct.calcsize(_DL_FMT)
 UPLINK_PACKET_SIZE: int = struct.calcsize(_UL_FMT)
 
-DOWNLINK_INTERVAL_S: float = 0.1
+DOWNLINK_INTERVAL_S: float = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +169,12 @@ class DataPayloadManager:
 
     def _run(self) -> None:
         """@brief Background 100 ms send loop."""
-        while not self._stop_event.wait(timeout=DOWNLINK_INTERVAL_S):
-            self._generate_and_send()
+        try:
+            while not self._stop_event.wait(timeout=DOWNLINK_INTERVAL_S):
+                self._generate_and_send()
+        except Exception as exc:
+            print(f"\n[data-payload-dl] UNHANDLED CRASH: {exc}", flush=True)
+            traceback.print_exc()
 
     def _generate_and_send(self) -> None:
         """@brief Build a downlink packet with demo data and send it."""

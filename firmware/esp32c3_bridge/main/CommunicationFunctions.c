@@ -1536,6 +1536,11 @@ static void bridge_accept_tcp_client(void)
     }
 
     s_tcp_client_fd = accepted_fd;
+
+    /* Bound TCP send so a slow or absent client cannot block the USB service loop. */
+    struct timeval snd_tv = { .tv_sec = 0, .tv_usec = 50000 }; /* 50 ms */
+    (void)setsockopt(s_tcp_client_fd, SOL_SOCKET, SO_SNDTIMEO, &snd_tv, sizeof(snd_tv));
+
     s_last_tcp_activity_us = esp_timer_get_time();
     s_last_keepalive_tx_us = 0;
     s_tcp_rx_length = 0U;

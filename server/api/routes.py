@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
@@ -50,6 +51,8 @@ def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
         link_runtime.note_monitor_event("runtime-error", f"{action_name} -> {exc}")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive fail-safe
+        print(f"\n[api] UNHANDLED EXCEPTION in {action_name}: {exc}", flush=True)
+        traceback.print_exc()
         link_runtime.note_monitor_event("exception", f"{action_name} raised {type(exc).__name__}")
         return asdict(link_runtime.capture_internal_failure(action_name, exc))
 

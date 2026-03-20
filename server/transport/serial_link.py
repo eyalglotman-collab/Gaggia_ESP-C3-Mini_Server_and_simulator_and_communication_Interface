@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import traceback
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -349,6 +350,21 @@ class SerialLinkManager:
         return released_pids
 
     def _reader_loop(self) -> None:
+        try:
+            self._reader_loop_inner()
+        except Exception as exc:
+            print(
+                f"\n[serial-link-rx] UNHANDLED CRASH on {self._port_name}: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
+            with self._lock:
+                self._detach_serial_locked(
+                    f"Reader thread crashed on {self._port_name}.",
+                    str(exc),
+                )
+
+    def _reader_loop_inner(self) -> None:
         while self._reader_running:
             current = self._serial
             if current is None:
@@ -369,6 +385,10 @@ class SerialLinkManager:
                             stale_serial.close()
                     except Exception:
                         pass
+                print(
+                    f"[serial-link-rx] Read error on {self._port_name}: {exc}",
+                    flush=True,
+                )
                 break
             if not chunk:
                 sleep(0.02)
@@ -380,6 +400,10 @@ class SerialLinkManager:
                 try:
                     frames = decode_frames(self._rx_buffer)
                 except FrameDecodeError as exc:
+                    print(
+                        f"[serial-link-rx] Frame decode error on {self._port_name}: {exc}",
+                        flush=True,
+                    )
                     self._set_event("RX frame decode error.", str(exc))
                     continue
                 for frame in frames:
