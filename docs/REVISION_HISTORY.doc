@@ -1,11 +1,42 @@
-{\rtf1\ansi\deff0
+﻿{\rtf1\ansi\deff0
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.1.19\par
-- Summary: Refactored bridge firmware communication runtime into CommunicationFunctions module and preserved behavior through successful build+flash.\par
+- Version: 0.2.4\par
+- Bridge Firmware Version: 0.1.21\par
+- Summary: Fixed COM4 overload and serial port stuck bugs, added comprehensive error handling with tracebacks, added COM port release to flash/monitor scripts, and generated full bridge design description document.\par
 \par
-\b X=0, Y=1\b0\par
+\b X=0, Y=2\b0\par
+\b 2026-03-20 19:02:11\b0\par
+- Version: 0.2.4\par
+- Firmware Version: 0.1.21\par
+- Summary: Bridge firmware SO_SNDTIMEO fix, downlink rate reduction, state machine bug fixes, comprehensive error handling, COM port release in scripts, and bridge design description document.\par
+- Notes: irmware/esp32c3_bridge/main/CommunicationFunctions.c now sets SO_SNDTIMEO=50ms on the TCP client socket after accept() to prevent blocking send() from stalling the USB JTAG receive loop and causing byte loss. server/sim/data_payload.py DOWNLINK_INTERVAL_S reduced from 0.1s to 0.5s (2 Hz) to reduce USB JTAG load. server/sim/link_state_machine.py fixed three bugs: added _check_port_alive_locked() to detect serial port closure mid-session, fixed close_transport() to set RESET state, fixed force_release_transport() to stop data_payload_manager before acquiring the state machine lock. Added import traceback + print to all background thread exception handlers in link_state_machine.py, serial_link.py, data_payload.py, and routes.py. Added Invoke-SimulatorComRelease to idfw.ps1, flash_hidden.ps1, and monitor_capture.ps1 for both server and client projects so COM4 is released before flash or monitor. Added scripts/generate_bridge_design_diagrams.ps1 (9 System.Drawing PNGs) and scripts/generate_bridge_design_docx.ps1 (full bridge design description document); output to docs/bridge_diagrams/ and docs/bridge_design_description.docx.\par
+\par
+\b 2026-03-19 (estimated)\b0\par
+- Version: 0.2.3\par
+- Firmware Version: 0.1.20\par
+- Summary: Added binary data payload channel between Python simulator and ESP32-S3 client via ESP32-C3 bridge.\par
+- Notes: Added irmware/esp32c3_bridge/main/data_payload.h and data_payload.c implementing a typed binary DATA frame with 20-float realtime array and uplink FIFO. Added server/sim/data_payload.py with DataPayloadManager (downlink send thread at 100ms, uplink receive FIFO). Updated server/sim/link_state_machine.py to route DATA frames to data_payload_manager and integrate binary send. Updated irmware/esp32c3_bridge/main/CommunicationFunctions.c with binary send support, larger TCP/USB buffers (600B payload), and DATA frame routing. Updated CMakeLists.txt to include data_payload.c. BRIDGE_FRAME_MAX_PAYLOAD increased to 600. Downlink packet: 535 bytes (magic 0xD0 + seq + 100f + 20i + 50s). Uplink packet: 539 bytes (magic 0xD1 + seq + timestamp_ms + 100f + 20i + 50s).\par
+\par
+\b 2026-03-18 (estimated)\b0\par
+- Version: 0.2.2\par
+- Firmware Version: 0.1.19\par
+- Summary: Intermediate stabilization: transport state machine hardening and keepalive watchdog refinements.\par
+- Notes: Incremental fixes to link_state_machine.py keepalive timeout handling and server-side live integer tracking. Bridge firmware kept at 0.1.19.\par
+\par
+\b 2026-03-17 (estimated)\b0\par
+- Version: 0.2.1\par
+- Firmware Version: 0.1.19\par
+- Summary: First fully working version with end-to-end RESET -> INITIALIZE -> CONNECT -> KEEPALIVE cycle.\par
+- Notes: Bridge INITIALIZE handler verified requiring data_ver=1 payload (BRIDGE_REALTIME_DATA_INTERFACE_VERSION=1). Bridge KEEPALIVE handler verified requiring rver=1 in client response. Bridge DATA frame confirmed: 170-byte binary payload. BRIDGE_FRAME_MAX_PAYLOAD = 256; client raised COMMUNICATION_FRAME_MAX_PAYLOAD to match. Transport fully operational: RESET -> INITIALIZE -> CONNECT -> KEEPALIVE cycle sustained continuously.\par
+\par
+\b 2026-03-17 (estimated)\b0\par
+- Version: 0.2.0\par
+- Firmware Version: 0.1.19\par
+- Summary: Major version bump for architecture change: server simulator refactored to new transport state machine and REST API surface.\par
+- Notes: Introduced server/sim/link_state_machine.py as the active simulator runtime replacing controller_state.py. New LinkState enum, keepalive engine, port-alive detection, and force-release transport. Updated server/api/routes.py to new API surface. Added POST /api/transport/release-com endpoint. Version bumped to 0.2.0 reflecting the architectural change in transport ownership and state model.\par
+\par\b X=0, Y=1\b0\par
 \b 2026-03-17 14:49:00\b0\par
 - Version: 0.1.19\par
 - Firmware Version: 0.1.19\par
