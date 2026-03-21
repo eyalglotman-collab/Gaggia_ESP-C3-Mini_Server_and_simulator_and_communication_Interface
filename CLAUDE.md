@@ -145,6 +145,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projec
 ```
 Launcher always runs requirements sync first before backend startup.
 
+### Claude Code — Run Simulator ("run sim")
+When Eyal says **"run sim"**, Claude must launch `launch_simulator_ui.ps1` asynchronously — fire and forget, do not wait for it to close. The simulator runs as a long-lived background process alongside the session.
+
+**Confirmed working method from Claude Code's shell:**
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\launch_simulator_ui.ps1'"
+```
+
+Key points:
+- No `-Wait` — the script is intentionally launched async and left running.
+- If startup fails, read the terminal block first (`[Simulator Launch Prerequisite Failure]`, `[Simulator Launch Verification Failure]`, or `[Simulator Launch Runtime Failure]`) — terminal output is the source of truth, not the popup.
+
 ### Session Setup — Every Session
 1. Open terminal in `Eyal_espresso_server_simulator`.
 2. Launch via `launch_simulator_ui.ps1` (see above).
@@ -164,6 +176,44 @@ cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/sc
 - Always run `build` first, then `flash` sequentially.
 - Required for all sessions (including Codex/WSL).
 
+### Claude Code Build Verification (non-interactive shell limitation)
+When running inside Claude Code's bash shell, Windows console programs (`idf.py`, `ninja`) write output
+to the Windows console buffer rather than the pipe, so no build output is visible and output capture
+via `2>&1` or PowerShell redirects does not work. If the binary timestamp does not update after running
+the build command, the build did not reach ninja.
+
+**Confirmed working method from Claude Code's shell** (clears MSYSTEM, uses -NoNewWindow to pipe output):
+
+Build:
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd build' -Wait -NoNewWindow -PassThru"
+```
+
+Flash:
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd -p COM4 flash' -Wait -NoNewWindow -PassThru"
+```
+
+If these fail, ask Eyal to run `idfw.cmd build` or `idfw.cmd -p COM4 flash` from a real CMD or VS Code integrated terminal and report back.
+
+Otherwise verify the build result using these checks instead of looking at idf.py output:
+
+1. Check the binary exists and has a recent timestamp:
+```bash
+ls -la .idfbuild/esp32c3_bridge/eyal_espresso_c3_bridge.bin
+```
+
+2. Confirm no source changes since the last known-good build:
+```bash
+git diff <last-good-commit> HEAD -- firmware/esp32c3_bridge/main/
+```
+If the diff is empty, the existing binary in `.idfbuild/esp32c3_bridge/` is valid and up to date.
+
+3. Play the build success sound after confirming a valid binary:
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\play_build_success_sound.ps1
+```
+
 ### Sound Cues
 Use the sound cue scripts in `scripts/` as workflow notifications for verification/build/flash outcomes.
 
@@ -171,7 +221,7 @@ Use the sound cue scripts in `scripts/` as workflow notifications for verificati
 Perform all git commits with real git access (not sandboxed). Reference format:
 ```bash
 git add <file>
-git -c user.name="Codex" -c user.email="codex@local" commit -m "type: <message>"
+git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
 ```
 
 ### Workspace Review Rules
@@ -192,6 +242,11 @@ Before substantial work, request saved prefix approvals for:
 
 ---
 
+## Current Architectural Intent
+- The server simulator is transport-first, not yet a full espresso-machine domain simulator.
+- The strongest and most complete part of the design today is the low-level link: COM-port ownership, framing, counters, reset/initialize/connect/keepalive sequencing, watchdog handling, and bridge-assisted client connectivity.
+- Higher-level machine behavior exists mainly as scaffolding compared with the transport layer.
+
 ## Architecture Notes
 - The simulator is transport-first; higher-level machine behavior is scaffolding compared to the transport layer.
 - Strongest parts: COM-port ownership, framing, counters, reset/initialize/connect/keepalive sequencing, watchdog handling, bridge-assisted connectivity.
@@ -203,4 +258,4 @@ Before substantial work, request saved prefix approvals for:
 
 ---
 
-*Last synced: 2026-03-18 — Created from AGENTS.md and README.md; no gaps detected.*
+*Last synced: 2026-03-21 — Updated to include README run-sim and build-verification sections; commit template aligned.*
