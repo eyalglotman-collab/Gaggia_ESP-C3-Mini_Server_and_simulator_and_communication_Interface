@@ -149,6 +149,44 @@ function Stop-PortListeners {
     Start-Sleep -Milliseconds 500
 }
 
+# @brief Stop stale simulator backend processes for the target port.
+# @details Some interrupted launches can leave detached backend Python
+# processes alive even when they are no longer the active listener. Those
+# stale instances can still contend for shared resources (for example COM
+# ports). This helper removes matching stale backends before a new launch.
+# @param[in] Port Target backend port.
+function Stop-StaleSimulatorBackends {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Port
+    )
+
+    $normalizedProjectRoot = [Regex]::Escape($ProjectRoot)
+    $portPattern = "(^|\s)--port\s+$Port(\s|$)"
+
+    $candidates = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq 'python.exe' -and
+            $_.CommandLine -and
+            ($_.CommandLine -match $normalizedProjectRoot) -and
+            ($_.CommandLine -match 'uvicorn') -and
+            ($_.CommandLine -match 'server\.app:app') -and
+            ($_.CommandLine -match $portPattern)
+        } |
+        Select-Object ProcessId -Unique
+
+    if (-not $candidates) {
+        return
+    }
+
+    foreach ($candidate in $candidates) {
+        Write-Host "Stopping stale simulator backend PID $($candidate.ProcessId) for port $Port."
+        Stop-ListenerProcess -ProcessId ([int]$candidate.ProcessId)
+    }
+
+    Start-Sleep -Milliseconds 500
+}
+
 # @brief Resolve the preferred Python interpreter for simulator backend startup.
 # @details Prefers the repository-local virtual-environment interpreter and
 # falls back to `python` only when the local interpreter is unavailable.
@@ -183,6 +221,7 @@ function Start-SimulatorBackend {
     try {
         # Keep one authoritative backend instance per port without killing unrelated services.
         Stop-PortListeners -Port $Port
+        Stop-StaleSimulatorBackends -Port $Port
         $args = @('-m', 'uvicorn', 'server.app:app', '--host', $HostName, '--port', "$Port")
         if ($Reload) {
             $args += '--reload'
@@ -217,6 +256,7 @@ function Start-SimulatorBackendProcess {
     Push-Location $ProjectRoot
     try {
         Stop-PortListeners -Port $Port
+        Stop-StaleSimulatorBackends -Port $Port
         $args = @('-m', 'uvicorn', 'server.app:app', '--host', $HostName, '--port', "$Port")
         if ($Reload) {
             $args += '--reload'

@@ -58,8 +58,11 @@ def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
 
 
 @router.get("/link")
-def get_link_snapshot() -> dict[str, object]:
-    return _run_snapshot_action("get_link_snapshot", link_runtime.get_snapshot)
+def get_link_snapshot(include_logs: bool = True) -> dict[str, object]:
+    return _run_snapshot_action(
+        "get_link_snapshot",
+        lambda: link_runtime.get_snapshot(include_logs=include_logs),
+    )
 
 
 @router.post("/config")

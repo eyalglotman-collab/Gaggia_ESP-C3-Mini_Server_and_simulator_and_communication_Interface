@@ -56,6 +56,10 @@ class SerialLinkManager:
         self._logs: deque[str] = deque(maxlen=2000)
         self._port_name = port_name or os.getenv("SIM_SERIAL_PORT", "COM4")
         self._baud_rate = baud_rate
+        self._read_timeout_sec = self._read_env_float("SIM_SERIAL_READ_TIMEOUT_SEC", 0.1, minimum=0.01)
+        self._write_timeout_sec = self._read_env_float("SIM_SERIAL_WRITE_TIMEOUT_SEC", 1.5, minimum=0.05)
+        self._tx_max_attempts = self._read_env_int("SIM_SERIAL_TX_MAX_ATTEMPTS", 3, minimum=1)
+        self._tx_retry_backoff_sec = self._read_env_float("SIM_SERIAL_TX_RETRY_BACKOFF_SEC", 0.05, minimum=0.0)
         self._protocol = "ESP32-C3 Framed Serial Link"
         self._last_event_at = self._timestamp()
         self._last_event = "Serial transport manager ready."
@@ -66,7 +70,35 @@ class SerialLinkManager:
         self._rx_frames_count = 0
         self._tx_bytes = 0
         self._rx_bytes = 0
-        self._log(f"Transport manager initialized for {self._port_name} @ {self._baud_rate}.")
+        self._log(
+            "Transport manager initialized for "
+            f"{self._port_name} @ {self._baud_rate} "
+            f"(read_timeout={self._read_timeout_sec:.2f}s, "
+            f"write_timeout={self._write_timeout_sec:.2f}s, "
+            f"tx_attempts={self._tx_max_attempts})."
+        )
+
+    @staticmethod
+    def _read_env_float(name: str, default: float, *, minimum: float) -> float:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = float(raw)
+        except ValueError:
+            return default
+        return max(minimum, value)
+
+    @staticmethod
+    def _read_env_int(name: str, default: int, *, minimum: int) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(minimum, value)
 
     def _timestamp(self) -> str:
         now = datetime.now(UTC)
@@ -160,15 +192,15 @@ class SerialLinkManager:
                     self._serial = serial.serial_for_url(
                         self._port_name,
                         self._baud_rate,
-                        timeout=0.1,
-                        write_timeout=0.25,
+                        timeout=self._read_timeout_sec,
+                        write_timeout=self._write_timeout_sec,
                     )
                 else:
                     self._serial = serial.Serial(
                         self._port_name,
                         self._baud_rate,
-                        timeout=0.1,
-                        write_timeout=0.25,
+                        timeout=self._read_timeout_sec,
+                        write_timeout=self._write_timeout_sec,
                     )
             except Exception as exc:  # pragma: no cover
                 self._serial = None
@@ -219,30 +251,70 @@ class SerialLinkManager:
 
     def send_frame(self, frame: Frame) -> SerialLinkSnapshot:
         data = encode_frame(frame)
-        stale_serial: Any | None = None
-        with self._lock:
-            current = self._serial
-            if current is None or not getattr(current, "is_open", False):
-                raise RuntimeError(f"Serial port {self._port_name} is not open.")
-            try:
-                current.write(data)
-            except Exception as exc:
-                stale_serial = self._detach_serial_locked(f"TX failed on {self._port_name}.", str(exc))
-                snapshot = self._snapshot_locked()
-            else:
-                self._tx_frames += 1
-                self._tx_bytes += len(data)
-                self._last_tx_at = self._timestamp()
-                self._set_event(f"TX {frame.message_type.name} seq={frame.sequence} host={frame.host_live_integer} bytes={len(data)}")
-                return self._snapshot_locked()
-        if stale_serial is not None:
-            try:
-                if getattr(stale_serial, "is_open", False):
-                    stale_serial.close()
-            except Exception:
-                pass
-            raise RuntimeError(snapshot.last_error or f"Serial port {self._port_name} write failed.")
+        for attempt in range(1, self._tx_max_attempts + 1):
+            stale_serial: Any | None = None
+            snapshot: SerialLinkSnapshot | None = None
+            should_retry = False
+
+            with self._lock:
+                current = self._serial
+                if current is None or not getattr(current, "is_open", False):
+                    raise RuntimeError(f"Serial port {self._port_name} is not open.")
+                try:
+                    current.write(data)
+                except Exception as exc:
+                    should_retry = attempt < self._tx_max_attempts and self._is_retryable_write_error(exc)
+                    if should_retry:
+                        self._set_event(
+                            (
+                                f"TX transient error on {self._port_name}; "
+                                f"retrying ({attempt}/{self._tx_max_attempts - 1})."
+                            ),
+                            str(exc),
+                        )
+                    else:
+                        stale_serial = self._detach_serial_locked(f"TX failed on {self._port_name}.", str(exc))
+                        snapshot = self._snapshot_locked()
+                else:
+                    self._tx_frames += 1
+                    self._tx_bytes += len(data)
+                    self._last_tx_at = self._timestamp()
+                    self._set_event(
+                        f"TX {frame.message_type.name} seq={frame.sequence} "
+                        f"host={frame.host_live_integer} bytes={len(data)}"
+                    )
+                    if attempt > 1:
+                        self._log(
+                            f"TX recovered after {attempt} attempts on {self._port_name} "
+                            f"for seq={frame.sequence}."
+                        )
+                    return self._snapshot_locked()
+
+            if stale_serial is not None:
+                try:
+                    if getattr(stale_serial, "is_open", False):
+                        stale_serial.close()
+                except Exception:
+                    pass
+                if snapshot is not None:
+                    raise RuntimeError(snapshot.last_error or f"Serial port {self._port_name} write failed.")
+                raise RuntimeError(f"Serial port {self._port_name} write failed.")
+
+            if should_retry:
+                sleep(self._tx_retry_backoff_sec)
+                continue
+
+            break
+
         raise RuntimeError(f"Serial port {self._port_name} write failed.")
+
+    def _is_retryable_write_error(self, exc: Exception) -> bool:
+        if serial is not None:
+            timeout_type = getattr(serial, "SerialTimeoutException", None)
+            if timeout_type is not None and isinstance(exc, timeout_type):
+                return True
+        message = str(exc).lower()
+        return "timeout" in message
 
     def pop_received_frames(self) -> list[Frame]:
         with self._lock:
