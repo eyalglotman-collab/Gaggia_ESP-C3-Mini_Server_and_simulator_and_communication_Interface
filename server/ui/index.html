@@ -851,6 +851,61 @@
       color:#ffd5de;
     }
 
+    .error-popup-overlay {
+      position:fixed;
+      inset:0;
+      z-index:80;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:rgba(5, 12, 18, .56);
+      backdrop-filter:blur(5px);
+      padding:20px;
+    }
+
+    .error-popup-overlay.active {
+      display:flex;
+    }
+
+    .error-popup-card {
+      width:min(640px, 100%);
+      border-radius:16px;
+      border:1px solid rgba(255, 127, 157, .35);
+      background:linear-gradient(180deg, rgba(49, 13, 21, .98), rgba(23, 8, 13, .98));
+      box-shadow:0 22px 56px rgba(0, 0, 0, .46);
+      color:#ffd5de;
+      padding:18px 18px 16px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .error-popup-title {
+      font-size:1.04rem;
+      font-weight:800;
+      letter-spacing:.01em;
+      color:#fff0f4;
+    }
+
+    .error-popup-message {
+      margin:0;
+      font-size:.85rem;
+      line-height:1.32;
+      color:#ffd9e1;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .error-popup-actions {
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
+
+    .error-popup-actions button {
+      min-width:120px;
+    }
+
     @keyframes stateBlink {
       0% { opacity:1; }
       50% { opacity:.48; }
@@ -989,6 +1044,8 @@
         </div>
         <div class="status-inline">
           <div id="statusTransport" class="status-chip warn">Transport Idle</div>
+          <div id="statusEsp32C3" class="status-chip danger">ESP32-C3 Disconnected</div>
+          <div id="statusUsbThroughput" class="status-chip warn">USB 0.00 kB/s</div>
           <div id="statusLogger" class="status-chip ok">Logger Live</div>
           <div id="statusHealth" class="status-chip ok">Backend Healthy</div>
         </div>
@@ -1267,6 +1324,16 @@
     </section>
   </main>
 
+  <div id="backendErrorPopup" class="error-popup-overlay" role="dialog" aria-modal="true" aria-labelledby="backendErrorTitle">
+    <div class="error-popup-card">
+      <div id="backendErrorTitle" class="error-popup-title">Simulator Backend Error</div>
+      <p id="backendErrorMessage" class="error-popup-message">The simulator backend returned an unexpected error.</p>
+      <div class="error-popup-actions">
+        <button id="backendErrorDismissButton" type="button" class="secondary">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const elements = {
       serialPort: document.getElementById('serialPort'),
@@ -1323,10 +1390,16 @@
       dashboardFirmwareVersion: document.getElementById('dashboardFirmwareVersion'),
       dashboardBuildTimestamp: document.getElementById('dashboardBuildTimestamp'),
       statusTransport: document.getElementById('statusTransport'),
+      statusEsp32C3: document.getElementById('statusEsp32C3'),
+      statusUsbThroughput: document.getElementById('statusUsbThroughput'),
       statusLogger: document.getElementById('statusLogger'),
       statusHealth: document.getElementById('statusHealth'),
       loggerModePill: document.getElementById('loggerModePill'),
       lowLevelLoggerModePill: document.getElementById('lowLevelLoggerModePill'),
+      backendErrorPopup: document.getElementById('backendErrorPopup'),
+      backendErrorTitle: document.getElementById('backendErrorTitle'),
+      backendErrorMessage: document.getElementById('backendErrorMessage'),
+      backendErrorDismissButton: document.getElementById('backendErrorDismissButton'),
     };
 
     let latestLogs = [];
@@ -1344,6 +1417,8 @@
     let delayPlotSamples = [];
     let activeWindowName = 'operational';
     let delayPlotFastRefreshInFlight = false;
+    let refreshInFlight = false;
+    let latestSnapshot = null;
     let stateVisuals = {};
     const stateDisplayNames = {
       reset: 'Reset',
@@ -1359,16 +1434,99 @@
     const commandStateMap = {
       resetButton: 'reset',
     };
+    const backendRequestTimeoutMs = 4000;
+    let backendErrorPopupDigest = '';
 
-    async function callJson(url, options = {}) {
-      const response = await fetch(url, options);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Request failed');
-      return payload;
+    function hideBackendErrorPopup() {
+      elements.backendErrorPopup.classList.remove('active');
     }
 
-    async function snapshot() {
-      return callJson('/api/link');
+    function showBackendErrorPopup(title, message) {
+      const safeTitle = title || 'Simulator Backend Error';
+      const safeMessage = message || 'The simulator backend returned an unexpected error.';
+      const digest = `${safeTitle}|${safeMessage}`;
+      if (digest === backendErrorPopupDigest && elements.backendErrorPopup.classList.contains('active')) return;
+      backendErrorPopupDigest = digest;
+      elements.backendErrorTitle.textContent = safeTitle;
+      elements.backendErrorMessage.textContent = safeMessage;
+      elements.backendErrorPopup.classList.add('active');
+    }
+
+    function isBackendUnresponsiveMessage(message) {
+      const lower = (message || '').toLowerCase();
+      return (
+        lower.includes('timed out') ||
+        lower.includes('failed to fetch') ||
+        lower.includes('networkerror') ||
+        lower.includes('network request failed')
+      );
+    }
+
+    function isUnexpectedBackendMessage(message) {
+      const lower = (message || '').toLowerCase();
+      return (
+        lower.includes('http 5') ||
+        lower.includes('non-json response') ||
+        lower.includes('unexpected backend response')
+      );
+    }
+
+    function reportBackendFailure(errorMessage, sourceLabel = 'request') {
+      const message = String(errorMessage || 'Request failed.');
+      if (isBackendUnresponsiveMessage(message)) {
+        showBackendErrorPopup(
+          'Simulator Backend Not Responding',
+          `${sourceLabel}: ${message}\n\nPlease verify the simulator backend process is running and reachable on port 8000.`
+        );
+        return;
+      }
+      if (isUnexpectedBackendMessage(message)) {
+        showBackendErrorPopup(
+          'Simulator Backend Unexpected Error',
+          `${sourceLabel}: ${message}\n\nThe backend responded in an unexpected way. Check backend logs and restart if needed.`
+        );
+      }
+    }
+
+    async function callJson(url, options = {}) {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), backendRequestTimeoutMs);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
+        const rawText = await response.text();
+        let payload = {};
+        if (rawText) {
+          try {
+            payload = JSON.parse(rawText);
+          } catch (_error) {
+            throw new Error(`Unexpected backend response (non-JSON). HTTP ${response.status}.`);
+          }
+        }
+        if (!response.ok) {
+          const detail = payload && typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`;
+          throw new Error(`HTTP ${response.status}: ${detail}`);
+        }
+        return payload;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error(`Backend request timed out after ${backendRequestTimeoutMs}ms.`);
+        }
+        if (error instanceof TypeError) {
+          throw new Error('Network request failed while contacting simulator backend.');
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    }
+
+    async function snapshot(includeLogs = true) {
+      const query = includeLogs ? '' : '?include_logs=0';
+      return callJson(`/api/link${query}`);
+    }
+
+    function shouldIncludeLogsForActiveWindow() {
+      return activeWindowName === 'lifecycle' || activeWindowName === 'low-level-log';
     }
 
     function collectConfigPayload() {
@@ -1848,11 +2006,40 @@
 
     function updateSummary(snapshot) {
       const transport = snapshot.transport || {};
+      const importantData = snapshot.important_data || {};
+      const bridgeReadyText = String(importantData['Bridge Ready'] || '').toLowerCase();
+      const esp32c3Connected = snapshot.esp32c3_connected ?? (Boolean(transport.port_open) && bridgeReadyText === 'yes');
+      const esp32c3LinkState = snapshot.esp32c3_link_state || (transport.port_open ? (esp32c3Connected ? 'connected' : 'syncing') : 'disconnected');
+      const usbRx = Number.isFinite(Number(snapshot.usb_rx_kbytes_per_sec))
+        ? Math.max(0, Number(snapshot.usb_rx_kbytes_per_sec))
+        : 0;
+      const usbTx = Number.isFinite(Number(snapshot.usb_tx_kbytes_per_sec))
+        ? Math.max(0, Number(snapshot.usb_tx_kbytes_per_sec))
+        : 0;
+      const usbTotal = Number.isFinite(Number(snapshot.usb_total_kbytes_per_sec))
+        ? Math.max(0, Number(snapshot.usb_total_kbytes_per_sec))
+        : 0;
 
       if (snapshotHasBlockingFault(snapshot)) setChipState(elements.statusTransport, 'danger', 'Reset Required');
       else if (snapshot.last_error) setChipState(elements.statusTransport, 'warn', 'Retrying Connection');
       else if (transport.port_open) setChipState(elements.statusTransport, 'ok', `Port Open: ${snapshot.config.serial_port}`);
       else setChipState(elements.statusTransport, 'warn', 'Transport Idle');
+
+      if (esp32c3LinkState === 'connected') {
+        setChipState(elements.statusEsp32C3, 'ok', 'ESP32-C3 Connected');
+      } else if (esp32c3LinkState === 'syncing') {
+        setChipState(elements.statusEsp32C3, 'warn', 'ESP32-C3 Syncing');
+      } else {
+        setChipState(elements.statusEsp32C3, 'danger', 'ESP32-C3 Disconnected');
+      }
+      elements.statusEsp32C3.title = transport.last_event || 'ESP32-C3 serial bridge link status';
+
+      setChipState(
+        elements.statusUsbThroughput,
+        transport.port_open ? 'ok' : 'warn',
+        `USB ${usbTotal.toFixed(2)} kB/s`
+      );
+      elements.statusUsbThroughput.title = `USB RX ${usbRx.toFixed(2)} kB/s | USB TX ${usbTx.toFixed(2)} kB/s`;
 
       setChipState(elements.statusHealth, 'ok', 'Backend Healthy');
     }
@@ -1865,10 +2052,18 @@
       renderTotalErrors(snapshot);
       renderDelayPlot(snapshot);
 
-      latestLogs = Array.isArray(snapshot.logs) ? snapshot.logs.slice(0, 2000) : [];
-      latestLowLevelLogs = Array.isArray(snapshot.low_level_logs) ? snapshot.low_level_logs.slice(0, 2000) : [];
-      renderLogWindow(false);
-      renderLowLevelLogWindow(false);
+      if (Array.isArray(snapshot.logs)) {
+        latestLogs = snapshot.logs;
+      }
+      if (Array.isArray(snapshot.low_level_logs)) {
+        latestLowLevelLogs = snapshot.low_level_logs;
+      }
+      if (activeWindowName === 'lifecycle') {
+        renderLogWindow(false);
+      }
+      if (activeWindowName === 'low-level-log') {
+        renderLowLevelLogWindow(false);
+      }
 
       syncInputValue(elements.serialPort, snapshot.config.serial_port);
       syncInputValue(elements.wifiSsid, snapshot.config.wifi_ssid);
@@ -1885,11 +2080,20 @@
     }
 
     async function refresh() {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
-        render(await snapshot());
+        const payload = await snapshot(shouldIncludeLogsForActiveWindow());
+        latestSnapshot = payload;
+        render(payload);
+        hideBackendErrorPopup();
       } catch (error) {
         setChipState(elements.statusHealth, 'danger', 'Backend Error');
-        setFlash(error.message, true);
+        const message = error instanceof Error ? error.message : 'Request failed.';
+        setFlash(message, true);
+        reportBackendFailure(message, 'refresh');
+      } finally {
+        refreshInFlight = false;
       }
     }
 
@@ -1899,7 +2103,9 @@
       if (telemetryFastRefreshInFlight) return;
       telemetryFastRefreshInFlight = true;
       try {
-        renderTelemetryTable(await snapshot());
+        if (latestSnapshot) {
+          renderTelemetryTable(latestSnapshot);
+        }
       } catch (_e) {
         /* Non-blocking: keep fast-loop failures silent. */
       } finally {
@@ -1913,8 +2119,7 @@
 
       delayPlotFastRefreshInFlight = true;
       try {
-        const snapshotPayload = await snapshot();
-        renderDelayPlot(snapshotPayload);
+        drawDelayPlotFromSamples();
       } catch (error) {
         /* Keep fast-loop failures non-blocking for the rest of the dashboard. */
       } finally {
@@ -1945,7 +2150,9 @@
           window.setTimeout(() => clearButtonState(button), 700);
         }
       } catch (error) {
-        setFlash(error.message, true);
+        const message = error instanceof Error ? error.message : 'Request failed.';
+        setFlash(message, true);
+        reportBackendFailure(message, `POST ${url}`);
         if (targetState) {
           setStateVisual(targetState, 'failure');
           renderStates({ available_states: Object.keys(stateVisuals), current_state: targetState });
@@ -1983,6 +2190,10 @@
     elements.loggerFilterInput.addEventListener('input', updateLoggerFilter);
     elements.lowLevelLoggerToggleButton.addEventListener('click', () => {
       setLoggersPaused(!loggerPaused, true);
+    });
+    elements.backendErrorDismissButton.addEventListener('click', hideBackendErrorPopup);
+    elements.backendErrorPopup.addEventListener('click', (event) => {
+      if (event.target === elements.backendErrorPopup) hideBackendErrorPopup();
     });
     elements.lowLevelLoggerFilterInput.addEventListener('input', updateLowLevelLoggerFilter);
     [

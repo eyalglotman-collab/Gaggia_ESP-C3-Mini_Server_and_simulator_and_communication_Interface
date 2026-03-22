@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
+from time import monotonic
 from traceback import format_exception_only
 
 from server.transport.frame_codec import Frame, MessageType
@@ -86,6 +87,11 @@ class LinkSnapshot:
     transport_last_delay_ms: int
     transport_max_delay_ms: int
     total_error_count: int
+    esp32c3_connected: bool
+    esp32c3_link_state: str
+    usb_rx_kbytes_per_sec: float
+    usb_tx_kbytes_per_sec: float
+    usb_total_kbytes_per_sec: float
     last_error: str
     important_data: dict[str, str]
     telemetry_data: dict[str, str]
@@ -150,6 +156,13 @@ class LinkRuntime:
         self._transport_min_delay_ms: int = 0
         self._ka_timing_valid: bool = False
         self._watchdog_timeout_count: int = 0
+        # USB throughput is derived from pyserial transport byte counters.
+        self._usb_rx_kbytes_per_sec: float = 0.0
+        self._usb_tx_kbytes_per_sec: float = 0.0
+        self._usb_total_kbytes_per_sec: float = 0.0
+        self._usb_last_sample_monotonic: float | None = None
+        self._usb_last_rx_bytes: int = 0
+        self._usb_last_tx_bytes: int = 0
         self._append_log("Transport runtime ready. Default TopLayer state is reset.")
 
     def _timestamp(self) -> str:
@@ -180,6 +193,50 @@ class LinkRuntime:
         combined_logs = list(self._logs) + serial_link_manager.get_logs()
         combined_logs.sort(reverse=True)
         return combined_logs[:2000]
+
+    def _update_usb_throughput_locked(self, transport_snapshot: SerialLinkSnapshot) -> None:
+        """@brief Update USB throughput metrics from pyserial byte telemetry.
+
+        @details The serial transport manager already tracks cumulative RX/TX
+        bytes. This helper samples those counters on every snapshot and computes
+        kB/s rates using a monotonic clock so wall-clock jumps do not skew
+        throughput calculations.
+        """
+
+        now = monotonic()
+        current_rx_bytes = int(transport_snapshot.rx_bytes)
+        current_tx_bytes = int(transport_snapshot.tx_bytes)
+
+        if self._usb_last_sample_monotonic is None:
+            self._usb_last_sample_monotonic = now
+            self._usb_last_rx_bytes = current_rx_bytes
+            self._usb_last_tx_bytes = current_tx_bytes
+            self._usb_rx_kbytes_per_sec = 0.0
+            self._usb_tx_kbytes_per_sec = 0.0
+            self._usb_total_kbytes_per_sec = 0.0
+            return
+
+        delta_seconds = now - self._usb_last_sample_monotonic
+        if delta_seconds <= 0.0:
+            self._usb_last_sample_monotonic = now
+            self._usb_last_rx_bytes = current_rx_bytes
+            self._usb_last_tx_bytes = current_tx_bytes
+            return
+
+        delta_rx_bytes = current_rx_bytes - self._usb_last_rx_bytes
+        delta_tx_bytes = current_tx_bytes - self._usb_last_tx_bytes
+        if delta_rx_bytes < 0:
+            delta_rx_bytes = 0
+        if delta_tx_bytes < 0:
+            delta_tx_bytes = 0
+
+        self._usb_rx_kbytes_per_sec = (delta_rx_bytes / 1024.0) / delta_seconds
+        self._usb_tx_kbytes_per_sec = (delta_tx_bytes / 1024.0) / delta_seconds
+        self._usb_total_kbytes_per_sec = self._usb_rx_kbytes_per_sec + self._usb_tx_kbytes_per_sec
+
+        self._usb_last_sample_monotonic = now
+        self._usb_last_rx_bytes = current_rx_bytes
+        self._usb_last_tx_bytes = current_tx_bytes
 
     def _set_state(self, state: LinkState, message: str, error: str = "") -> None:
         self._current_state = state
@@ -1171,16 +1228,24 @@ class LinkRuntime:
             self._append_log("Telemetry reset: transport max delay cleared.")
             return self._snapshot_locked()
 
-    def get_snapshot(self) -> LinkSnapshot:
+    def get_snapshot(self, *, include_logs: bool = True) -> LinkSnapshot:
         with self._lock:
             self._poll_received_frames_locked()
             self._check_port_alive_locked()
             self._enforce_running_integer_timeout_locked()
             self._advance_automatic_flow_locked()
-            return self._snapshot_locked()
+            return self._snapshot_locked(include_logs=include_logs)
 
-    def _snapshot_locked(self) -> LinkSnapshot:
+    def _snapshot_locked(self, *, include_logs: bool = True) -> LinkSnapshot:
         transport_snapshot: SerialLinkSnapshot = serial_link_manager.get_snapshot()
+        self._update_usb_throughput_locked(transport_snapshot)
+        esp32c3_connected = bool(transport_snapshot.port_open and self._bridge_ready)
+        if not transport_snapshot.port_open:
+            esp32c3_link_state = "disconnected"
+        elif self._bridge_ready:
+            esp32c3_link_state = "connected"
+        else:
+            esp32c3_link_state = "syncing"
         important_data = {
             "Current State": self._state_display_name(self._current_state),
             "Serial Port": self._config.serial_port,
@@ -1250,6 +1315,9 @@ class LinkRuntime:
             "Serial RX Frames": str(transport_snapshot.rx_frames),
             "Serial TX Bytes": str(transport_snapshot.tx_bytes),
             "Serial RX Bytes": str(transport_snapshot.rx_bytes),
+            "USB RX Throughput [kB/s]": f"{self._usb_rx_kbytes_per_sec:.2f}",
+            "USB TX Throughput [kB/s]": f"{self._usb_tx_kbytes_per_sec:.2f}",
+            "USB Total Throughput [kB/s]": f"{self._usb_total_kbytes_per_sec:.2f}",
             "DL Packets Sent": str(dp_stats["dl_tx_count"]),
             "DL Sequence": str(dp_stats["dl_seq"]),
             "UL Packets Received": str(dp_stats["ul_rx_count"]),
@@ -1277,12 +1345,17 @@ class LinkRuntime:
             transport_last_delay_ms=self._transport_last_delay_ms,
             transport_max_delay_ms=self._transport_max_delay_ms,
             total_error_count=self._total_error_count,
+            esp32c3_connected=esp32c3_connected,
+            esp32c3_link_state=esp32c3_link_state,
+            usb_rx_kbytes_per_sec=self._usb_rx_kbytes_per_sec,
+            usb_tx_kbytes_per_sec=self._usb_tx_kbytes_per_sec,
+            usb_total_kbytes_per_sec=self._usb_total_kbytes_per_sec,
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
             telemetry_data=telemetry_data,
             transport=asdict(transport_snapshot),
-            logs=self._combined_logs_locked(),
-            low_level_logs=serial_link_manager.get_logs()[:2000],
+            logs=self._combined_logs_locked() if include_logs else [],
+            low_level_logs=serial_link_manager.get_logs()[:2000] if include_logs else [],
             available_states=[state.value for state in LinkState],
         )
 
