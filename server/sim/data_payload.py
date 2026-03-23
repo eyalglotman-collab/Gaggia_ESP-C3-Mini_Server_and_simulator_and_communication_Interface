@@ -224,12 +224,13 @@ class DataPayloadManager:
             amplitude = self._sine_amplitude
             frequency_hz = self._sine_frequency_hz
             phase_rad = self._sine_phase_rad
+            sample_period_s = DOWNLINK_INTERVAL_S / float(DATA_SIZE_FLOATS)
+            phase_step = 2.0 * math.pi * frequency_hz * sample_period_s
             self._sine_phase_rad = (
-                phase_rad + (2.0 * math.pi * frequency_hz * DOWNLINK_INTERVAL_S)
+                phase_rad + (phase_step * float(DATA_SIZE_FLOATS))
             ) % (2.0 * math.pi)
 
-        # Fill all 100 float fields with a sine shape for client graph plotting.
-        phase_step = (2.0 * math.pi) / float(DATA_SIZE_FLOATS)
+        # Fill all 100 float fields with a time-domain sine sampled over one packet.
         floats = [
             float(amplitude * math.sin(phase_rad + (phase_step * sample_index)))
             for sample_index in range(DATA_SIZE_FLOATS)

@@ -1469,6 +1469,17 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             bridge_send_telemetry_update_usb();
         } else if (transport == BRIDGE_TRANSPORT_USB
                    && frame->payload_length > 0U
+                   && frame->payload[0] != BRIDGE_DATA_MAGIC_DOWNLINK) {
+            /* Text DATA event from simulator UI/runtime: forward to TCP client. */
+            if (s_tcp_client_fd >= 0) {
+                bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,
+                                         frame->payload, frame->payload_length);
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_forwarded_tcp");
+            } else {
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_tcp_not_connected");
+            }
+        } else if (transport == BRIDGE_TRANSPORT_USB
+                   && frame->payload_length > 0U
                    && frame->payload[0] == BRIDGE_DATA_MAGIC_DOWNLINK) {
             /* Binary downlink packet (server → client): forward transparently to TCP. */
             bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,

@@ -1261,6 +1261,20 @@ class LinkRuntime:
         sim_stats = data_payload_manager.get_stats()
 
         with self._lock:
+            if enabled is not None:
+                # Mirror Screen 6 ON/OFF toggles to the TCP client so the
+                # client-side Simulate Data toggle stays synchronized.
+                transport_snapshot = serial_link_manager.get_snapshot()
+                simulation_event_text = "DataSimulationOn" if sim_stats["sim_enabled"] else "DataSimulationOFF"
+                if transport_snapshot.port_open:
+                    try:
+                        self._send_command_locked(MessageType.DATA, simulation_event_text)
+                        self._append_log(f"Screen 6 forwarded {simulation_event_text} to client.")
+                    except RuntimeError as exc:
+                        self._append_log(
+                            f"Screen 6 could not forward {simulation_event_text} to client: {exc}"
+                        )
+
             if enabled is None:
                 self._append_log(
                     "Screen 6 updated simulation parameters "

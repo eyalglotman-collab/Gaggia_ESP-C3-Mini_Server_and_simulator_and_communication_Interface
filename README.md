@@ -165,6 +165,20 @@ cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/sc
 You must run build and flash sequentially, with `build` first and `flash` second.
 For Codex/WSL sessions, this absolute-path `cmd.exe` method is the required build and flash path.
 
+## Rule-Gated Execution Sequence (Mandatory)
+
+For every verification/build/flash task, Codex/Claude must use this exact gated sequence and explicitly report each gate:
+
+1. Gate 1: quick compliance check of `AGENTS.md`, `README.md`, and `CLAUDE.md`.
+2. Gate 2: run `scripts/start_wait_sound.ps1`.
+3. Gate 3: execute requested build/flash actions sequentially only (no parallel flashing).
+4. Gate 4: run post-flash monitor capture for each flashed target and summarize results.
+5. Gate 5: run `scripts/stop_wait_sound.ps1`.
+6. Gate 6: on successful completion, run `scripts/play_build_success_sound.ps1`.
+
+If any gate fails, the sequence is non-compliant and execution must stop immediately with:
+`RULE-GATED SEQUENCE BROKEN: <gate>`.
+
 ### Claude Code Build Verification (non-interactive shell limitation)
 
 When running inside Claude Code's bash shell, Windows console programs (`idf.py`, `ninja`) write output

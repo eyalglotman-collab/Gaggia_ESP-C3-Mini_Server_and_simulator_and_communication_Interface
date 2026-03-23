@@ -1054,6 +1054,7 @@
         <div class="status-inline">
           <div id="statusTransport" class="status-chip warn">Transport Idle</div>
           <div id="statusEsp32C3" class="status-chip danger">ESP32-C3 Disconnected</div>
+          <div id="statusClientLive" class="status-chip danger">Client Live: No</div>
           <div id="statusUsbThroughput" class="status-chip warn">USB 0.00 kB/s</div>
           <div id="statusLogger" class="status-chip ok">Logger Live</div>
           <div id="statusHealth" class="status-chip ok">Backend Healthy</div>
@@ -1452,6 +1453,7 @@
       dashboardBuildTimestamp: document.getElementById('dashboardBuildTimestamp'),
       statusTransport: document.getElementById('statusTransport'),
       statusEsp32C3: document.getElementById('statusEsp32C3'),
+      statusClientLive: document.getElementById('statusClientLive'),
       statusUsbThroughput: document.getElementById('statusUsbThroughput'),
       statusLogger: document.getElementById('statusLogger'),
       statusHealth: document.getElementById('statusHealth'),
@@ -2153,6 +2155,11 @@
       const bridgeReadyText = String(importantData['Bridge Ready'] || '').toLowerCase();
       const esp32c3Connected = snapshot.esp32c3_connected ?? (Boolean(transport.port_open) && bridgeReadyText === 'yes');
       const esp32c3LinkState = snapshot.esp32c3_link_state || (transport.port_open ? (esp32c3Connected ? 'connected' : 'syncing') : 'disconnected');
+      const stateName = String(snapshot.current_state || '').toLowerCase();
+      const clientKeepaliveLive = (
+        stateName === 'keepalive_server_send'
+        || stateName === 'keepalive_client_return'
+      );
       const usbRx = Number.isFinite(Number(snapshot.usb_rx_kbytes_per_sec))
         ? Math.max(0, Number(snapshot.usb_rx_kbytes_per_sec))
         : 0;
@@ -2176,6 +2183,15 @@
         setChipState(elements.statusEsp32C3, 'danger', 'ESP32-C3 Disconnected');
       }
       elements.statusEsp32C3.title = transport.last_event || 'ESP32-C3 serial bridge link status';
+
+      if (clientKeepaliveLive) {
+        setChipState(elements.statusClientLive, 'ok', 'Client Live: Yes');
+      } else {
+        setChipState(elements.statusClientLive, 'danger', 'Client Live: No');
+      }
+      elements.statusClientLive.title = clientKeepaliveLive
+        ? 'Client is in keepalive state.'
+        : 'Client is not in keepalive state.';
 
       setChipState(
         elements.statusUsbThroughput,
