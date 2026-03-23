@@ -44,8 +44,8 @@ STATE_DISPLAY_NAMES = {
     LinkState.RESET: "Reset",
     LinkState.INITIALIZE: "Initialize",
     LinkState.CONNECT: "Connect",
-    LinkState.KEEPALIVE_SERVER_SEND: "KeepAliveServerSend",
-    LinkState.KEEPALIVE_CLIENT_RETURN: "KeepAliveClientReturn",
+    LinkState.KEEPALIVE_SERVER_SEND: "USB_TransportKeepAlive_ServerSend",
+    LinkState.KEEPALIVE_CLIENT_RETURN: "USB_TransportKeepAlive_ClientReturn",
     LinkState.DISCONNECT: "Disconnect",
     LinkState.ERROR: "Error",
 }
@@ -725,7 +725,10 @@ class LinkRuntime:
                             (frame.device_live_integer & 1) == 0 or
                             (frame.device_live_integer + 1) != frame.host_live_integer):
                             self._append_log(
-                                "KeepAliveServerSend ignored due to parity/counter mismatch; waiting for timeout retry."
+                                (
+                                    "USB_TransportKeepAlive_ServerSend ignored due to parity/counter mismatch; "
+                                    "waiting for timeout retry."
+                                )
                             )
                             continue
 
@@ -746,7 +749,10 @@ class LinkRuntime:
                         self._pending_auto_stage = None
                         self._set_state(
                             LinkState.KEEPALIVE_CLIENT_RETURN,
-                            "KeepAliveServerSend observed; waiting for KeepAliveClientReturn.",
+                            (
+                                "USB_TransportKeepAlive_ServerSend observed; waiting for "
+                                "USB_TransportKeepAlive_ClientReturn."
+                            ),
                         )
                         continue
 
@@ -755,7 +761,10 @@ class LinkRuntime:
                             (frame.device_live_integer & 1) == 0 or
                             frame.host_live_integer != (frame.device_live_integer + 1)):
                             self._append_log(
-                                "KeepAliveClientReturn ignored due to parity/counter mismatch; bridge timeout handling remains active."
+                                (
+                                    "USB_TransportKeepAlive_ClientReturn ignored due to parity/counter mismatch; "
+                                    "bridge timeout handling remains active."
+                                )
                             )
                             continue
 
@@ -773,7 +782,10 @@ class LinkRuntime:
                         self._bottom_layer_retry_count = 0
                         self._set_state(
                             LinkState.KEEPALIVE_SERVER_SEND,
-                            "KeepAliveClientReturn validated; waiting for next KeepAliveServerSend.",
+                            (
+                                "USB_TransportKeepAlive_ClientReturn validated; waiting for next "
+                                "USB_TransportKeepAlive_ServerSend."
+                            ),
                         )
                         continue
 
@@ -902,7 +914,10 @@ class LinkRuntime:
 
         self._watchdog_timeout_count += 1
         self._append_log(
-            "Monitor note: KeepAliveClientReturn exceeded timeout window; waiting for bridge retry handling."
+            (
+                "Monitor note: USB_TransportKeepAlive_ClientReturn exceeded timeout window; "
+                "waiting for bridge retry handling."
+            )
         )
         self._last_running_integer_rx_at = datetime.now(UTC)
 

@@ -2,11 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.2.8\par
-- Bridge Firmware Version: 0.1.23\par
-- Summary: Fixed simulator sine parameter responsiveness, added keepalive Live status indication, and synchronized simulator/client simulation controls\par
+- Version: 0.2.9\par
+- Bridge Firmware Version: 0.1.24\par
+- Summary: Added keepalive-state naming clarity, delayed-plot suppression when no client/keepalive is active, and reinforced COM-release handling in build/flash/monitor scripts.\par
 \par
 \b X=0, Y=2\b0\par
+\b 2026-03-23 17:20:00\b0\par
+- Version: 0.2.9\par
+- Firmware Version: 0.1.24\par
+- Summary: Renamed keepalive state labels to USB_TransportKeepAlive names, hid delay-plot data when no live client/keepalive exists, and hardened COM release around tool actions.\par
+- Notes: `firmware/esp32c3_bridge/main/CommunicationFunctions.c` now reports keepalive runtime states as `USB_TransportKeepAlive_ServerSend` and `USB_TransportKeepAlive_ClientReturn` for clearer runtime visibility. `server/sim/link_state_machine.py` aligns display/log strings with the same naming. `server/ui/index.html` now suppresses and clears delay-plot samples when TCP/keepalive are both inactive, showing explicit N/A labels and a no-connection message instead of stale delay data. `scripts/idfw.cmd`, `scripts/idfw.ps1`, `scripts/flash_hidden.ps1`, and `scripts/monitor_capture.ps1` now release COM ports before and after actions to reduce stale lock failures.\par
+\par
 \b 2026-03-23 12:17:04\b0\par
 - Version: 0.2.8\par
 - Firmware Version: 0.1.23\par

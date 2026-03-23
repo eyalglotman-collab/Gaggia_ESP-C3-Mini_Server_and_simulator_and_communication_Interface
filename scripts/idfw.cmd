@@ -40,5 +40,17 @@ set "PYTHONHOME="
 
 set "PATH=%IDF_PYTHON_ENV_PATH%\Scripts;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Espressif\tools\cmake\3.30.2\bin;C:\Espressif\tools\ninja\1.12.1;C:\Espressif\tools\xtensa-esp-elf\esp-14.2.0_20251107\xtensa-esp-elf\bin;C:\Espressif\tools\riscv32-esp-elf\esp-14.2.0_20251107\riscv32-esp-elf\bin;C:\Espressif;%PATH%"
 
+echo Releasing COM port before idf action...
+call :ReleaseCom
+
 "%PYTHON_EXE%" "%IDF_PATH%\tools\idf.py" -C "%FIRMWARE_ROOT%" -B "%BUILD_DIR%" -DIDF_TARGET=esp32c3 %*
-exit /b %ERRORLEVEL%
+set "CMD_EXIT=%ERRORLEVEL%"
+
+echo Releasing COM port after idf action...
+call :ReleaseCom
+
+exit /b %CMD_EXIT%
+
+:ReleaseCom
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/api/transport/release-com' -Method Post -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null } catch {}; Start-Sleep -Milliseconds 500" >nul 2>nul
+exit /b 0

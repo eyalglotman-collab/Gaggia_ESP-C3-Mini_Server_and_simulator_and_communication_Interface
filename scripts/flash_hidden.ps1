@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# @brief Release the COM port held by the simulator before flashing.
+# @brief Release the COM port held by the simulator around flashing.
 # @details POSTs to the simulator HTTP API to force-release the serial link.
 # All errors are suppressed so flash proceeds even when the sim is not running.
 function Invoke-SimulatorComRelease {
@@ -53,6 +53,9 @@ $proc = Start-Process -FilePath "powershell.exe" `
 
 $proc.Refresh()
 $exitCode = $proc.ExitCode
+
+Write-Host "Releasing COM port after flash..."
+Invoke-SimulatorComRelease
 
 if ($exitCode -eq 0 -and (Test-Path $SuccessSoundScript)) {
     try {

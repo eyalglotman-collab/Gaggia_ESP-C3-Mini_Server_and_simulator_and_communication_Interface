@@ -1478,6 +1478,8 @@
     const delayPlotWindowMs = 10_000;
     const delayPlotFastRefreshMs = 200;
     let delayPlotSamples = [];
+    let delayPlotSuppressed = false;
+    let delayPlotSuppressedMessage = 'Waiting for delay samples...';
     let activeWindowName = 'operational';
     let delayPlotFastRefreshInFlight = false;
     let refreshInFlight = false;
@@ -1487,8 +1489,8 @@
       reset: 'Reset',
       initialize: 'Initialize',
       connect: 'Connect',
-      keepalive_server_send: 'KeepAliveServerSend',
-      keepalive_client_return: 'KeepAliveClientReturn',
+      keepalive_server_send: 'USB_TransportKeepAlive_ServerSend',
+      keepalive_client_return: 'USB_TransportKeepAlive_ClientReturn',
       disconnect: 'Disconnect',
       error: 'Error',
     };
@@ -1901,6 +1903,20 @@
       delayPlotSamples = delayPlotSamples.filter((sample) => sample.t >= cutoff);
     }
 
+    function isClientKeepaliveLive(snapshot) {
+      const stateName = String(snapshot?.current_state || '').toLowerCase();
+      return stateName === 'keepalive_server_send' || stateName === 'keepalive_client_return';
+    }
+
+    function isClientTcpConnected(snapshot) {
+      if (typeof snapshot?.tcp_connected === 'boolean') {
+        return snapshot.tcp_connected;
+      }
+      const importantData = snapshot?.important_data || {};
+      const tcpText = String(importantData['TCP Connected'] || '').trim().toLowerCase();
+      return tcpText === 'yes' || tcpText === 'on' || tcpText === 'true';
+    }
+
     function formatTickValue(value) {
       if (value >= 100) return `${Math.round(value)}`;
       if (value >= 10) return `${value.toFixed(1)}`;
@@ -1920,8 +1936,13 @@
         ? delayPlotSamples.reduce((maxValue, sample) => Math.max(maxValue, sample.v), 0)
         : 0;
 
-      elements.delayPlotLatestLabel.textContent = `Latest Delay: ${Math.round(latestValue)} mS`;
-      elements.delayPlotMaxLabel.textContent = `Window Max: ${Math.round(windowMax)} mS`;
+      if (delayPlotSuppressed) {
+        elements.delayPlotLatestLabel.textContent = 'Latest Delay: N/A';
+        elements.delayPlotMaxLabel.textContent = 'Window Max: N/A';
+      } else {
+        elements.delayPlotLatestLabel.textContent = `Latest Delay: ${Math.round(latestValue)} mS`;
+        elements.delayPlotMaxLabel.textContent = `Window Max: ${Math.round(windowMax)} mS`;
+      }
 
       const cssWidth = Math.max(canvas.clientWidth || 1, 1);
       const cssHeight = Math.max(canvas.clientHeight || 1, 1);
@@ -2011,11 +2032,27 @@
         ctx.fillStyle = 'rgba(198, 219, 234, 0.72)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Waiting for delay samples...', leftPad + plotWidth / 2, topPad + plotHeight / 2);
+        const emptyMessage = delayPlotSuppressed
+          ? delayPlotSuppressedMessage
+          : 'Waiting for delay samples...';
+        ctx.fillText(emptyMessage, leftPad + plotWidth / 2, topPad + plotHeight / 2);
       }
     }
 
     function renderDelayPlot(snapshot) {
+      const keepaliveLive = isClientKeepaliveLive(snapshot);
+      const tcpConnected = isClientTcpConnected(snapshot);
+      if (!tcpConnected && !keepaliveLive) {
+        delayPlotSuppressed = true;
+        delayPlotSuppressedMessage = 'No client connection / keepalive. Delay plot hidden.';
+        if (delayPlotSamples.length > 0) {
+          delayPlotSamples = [];
+        }
+        drawDelayPlotFromSamples();
+        return;
+      }
+
+      delayPlotSuppressed = false;
       sampleDelay(snapshot);
       drawDelayPlotFromSamples();
     }
@@ -2155,11 +2192,7 @@
       const bridgeReadyText = String(importantData['Bridge Ready'] || '').toLowerCase();
       const esp32c3Connected = snapshot.esp32c3_connected ?? (Boolean(transport.port_open) && bridgeReadyText === 'yes');
       const esp32c3LinkState = snapshot.esp32c3_link_state || (transport.port_open ? (esp32c3Connected ? 'connected' : 'syncing') : 'disconnected');
-      const stateName = String(snapshot.current_state || '').toLowerCase();
-      const clientKeepaliveLive = (
-        stateName === 'keepalive_server_send'
-        || stateName === 'keepalive_client_return'
-      );
+      const clientKeepaliveLive = isClientKeepaliveLive(snapshot);
       const usbRx = Number.isFinite(Number(snapshot.usb_rx_kbytes_per_sec))
         ? Math.max(0, Number(snapshot.usb_rx_kbytes_per_sec))
         : 0;

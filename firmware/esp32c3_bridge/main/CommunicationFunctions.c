@@ -185,9 +185,9 @@ static const char *bridge_state_to_string(bridge_state_t state)
     case BRIDGE_STATE_CONNECT:
         return "Connect";
     case BRIDGE_STATE_KEEPALIVE_SERVER_SEND:
-        return "KeepAliveServerSend";
+        return "USB_TransportKeepAlive_ServerSend";
     case BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN:
-        return "KeepAliveClientReturn";
+        return "USB_TransportKeepAlive_ClientReturn";
     case BRIDGE_STATE_DISCONNECT:
         return "Disconnect";
     case BRIDGE_STATE_ERROR:
