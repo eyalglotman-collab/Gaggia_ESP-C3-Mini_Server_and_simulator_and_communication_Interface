@@ -1479,6 +1479,12 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
             /* Binary uplink packet (client → server): forward transparently to USB. */
             bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
                                      frame->payload, frame->payload_length);
+        } else if (transport == BRIDGE_TRANSPORT_TCP
+                   && frame->payload_length > 0U) {
+            /* Text DATA event from client (e.g. DataSimulationOn/OFF): forward to USB host runtime. */
+            bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
+                                     frame->payload, frame->payload_length);
+            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_forwarded_usb");
         } else {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
         }

@@ -87,6 +87,23 @@ def test_transport_config_update_round_trip() -> None:
     assert payload['config']['keepalive_period_ms'] == 150
 
 
+def test_simulation_config_route_updates_snapshot() -> None:
+    client = TestClient(app)
+    response = client.post(
+        '/api/simulation/config',
+        json={
+            'enabled': True,
+            'amplitude': 2.5,
+            'frequency_hz': 3.0,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['important_data']['Data Simulation'] == 'On'
+    assert payload['important_data']['Simulation Amplitude'] == '2.500'
+    assert payload['important_data']['Simulation Frequency [Hz]'] == '3.000'
+
+
 def test_open_port_reports_already_open(monkeypatch) -> None:
     client = TestClient(app)
 
@@ -191,6 +208,11 @@ def test_all_api_routes_return_snapshots(monkeypatch) -> None:
             'wifi_connect_timeout_ms': 10000,
             'tcp_connect_timeout_ms': 3000,
             'keepalive_period_ms': 100,
+        }),
+        ('post', '/api/simulation/config', {
+            'enabled': True,
+            'amplitude': 1.0,
+            'frequency_hz': 1.0,
         }),
         ('post', '/api/transport/open', {'port_name': 'COM4'}),
         ('post', '/api/transport/close', None),

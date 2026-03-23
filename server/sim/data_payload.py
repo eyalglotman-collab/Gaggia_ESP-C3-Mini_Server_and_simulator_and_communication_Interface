@@ -14,6 +14,7 @@ Client → Server (uplink):
 
 from __future__ import annotations
 
+import math
 import struct
 import time
 import traceback
@@ -47,7 +48,9 @@ _UL_FMT: str = f"<BII{DATA_SIZE_FLOATS}f{DATA_SIZE_INT}i{DATA_SIZE_STRING}s"
 DOWNLINK_PACKET_SIZE: int = struct.calcsize(_DL_FMT)
 UPLINK_PACKET_SIZE: int = struct.calcsize(_UL_FMT)
 
-DOWNLINK_INTERVAL_S: float = 0.5
+DOWNLINK_INTERVAL_S: float = 0.1
+DEFAULT_SINE_AMPLITUDE: float = 1.0
+DEFAULT_SINE_FREQUENCY_HZ: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +131,10 @@ class DataPayloadManager:
         self._ul_drop_count: int = 0
         self._dl_tx_count: int = 0
         self._last_ul_seq: int = -1
+        self._simulation_enabled: bool = False
+        self._sine_amplitude: float = DEFAULT_SINE_AMPLITUDE
+        self._sine_frequency_hz: float = DEFAULT_SINE_FREQUENCY_HZ
+        self._sine_phase_rad: float = 0.0
         self._send_callback: Optional[Callable[[bytes], None]] = None
         self._stop_event = Event()
         self._thread: Optional[Thread] = None
@@ -149,6 +156,8 @@ class DataPayloadManager:
         self.stop()
         self._send_callback = send_callback
         self._dl_seq = 0
+        self._simulation_enabled = False
+        self._sine_phase_rad = 0.0
         self._stop_event.clear()
         self._thread = Thread(target=self._run, daemon=True, name="data_payload_dl")
         self._thread.start()
@@ -162,6 +171,32 @@ class DataPayloadManager:
         with self._lock:
             self._ul_fifo.clear()
             self._dl_seq = 0
+            self._simulation_enabled = False
+            self._sine_phase_rad = 0.0
+
+    # ------------------------------------------------------------------
+    # Simulation control
+    # ------------------------------------------------------------------
+
+    def set_simulation_enabled(self, enabled: bool) -> None:
+        """@brief Enable or disable sine-wave downlink generation."""
+        with self._lock:
+            self._simulation_enabled = bool(enabled)
+
+    def configure_sine(self, *, amplitude: float | None = None, frequency_hz: float | None = None) -> None:
+        """@brief Update sine generator amplitude and frequency parameters.
+
+        @details Parameters are clamped to safe positive ranges so malformed
+        command payloads cannot create invalid values in the generator.
+
+        @param amplitude    Optional new sine amplitude.
+        @param frequency_hz Optional new sine frequency in Hz.
+        """
+        with self._lock:
+            if amplitude is not None:
+                self._sine_amplitude = max(0.0, min(float(amplitude), 1000.0))
+            if frequency_hz is not None:
+                self._sine_frequency_hz = max(0.01, min(float(frequency_hz), 1000.0))
 
     # ------------------------------------------------------------------
     # Downlink send thread
@@ -177,19 +212,34 @@ class DataPayloadManager:
             traceback.print_exc()
 
     def _generate_and_send(self) -> None:
-        """@brief Build a downlink packet with demo data and send it."""
+        """@brief Build one sine-wave downlink packet and send it when enabled."""
         cb = self._send_callback
         if cb is None:
             return
         with self._lock:
+            if not self._simulation_enabled:
+                return
             seq = self._dl_seq
             self._dl_seq = (self._dl_seq + 1) & 0xFFFFFFFF
+            amplitude = self._sine_amplitude
+            frequency_hz = self._sine_frequency_hz
+            phase_rad = self._sine_phase_rad
+            self._sine_phase_rad = (
+                phase_rad + (2.0 * math.pi * frequency_hz * DOWNLINK_INTERVAL_S)
+            ) % (2.0 * math.pi)
 
-        # Demo payload: f[0] = packet sequence as float, all others zero.
-        # Replace this with real machine data when the application is ready.
-        floats = [float(seq)] + [0.0] * (DATA_SIZE_FLOATS - 1)
-        ints = [seq & 0x7FFFFFFF] + [0] * (DATA_SIZE_INT - 1)
-        text = f"dl_seq={seq}"
+        # Fill all 100 float fields with a sine shape for client graph plotting.
+        phase_step = (2.0 * math.pi) / float(DATA_SIZE_FLOATS)
+        floats = [
+            float(amplitude * math.sin(phase_rad + (phase_step * sample_index)))
+            for sample_index in range(DATA_SIZE_FLOATS)
+        ]
+        ints = [
+            seq & 0x7FFFFFFF,
+            int(round(amplitude * 1000.0)),
+            int(round(frequency_hz * 1000.0)),
+        ] + [0] * (DATA_SIZE_INT - 3)
+        text = f"sim=on;amp={amplitude:.3f};freq={frequency_hz:.3f};seq={seq}"
 
         payload = encode_downlink(seq, floats, ints, text)
         try:
@@ -239,7 +289,8 @@ class DataPayloadManager:
 
         @return Dict with keys ``dl_tx_count``, ``ul_rx_count``,
                 ``ul_drop_count``, ``ul_fifo_depth``, ``dl_seq``,
-                ``last_ul_seq``.
+                ``last_ul_seq``, ``sim_enabled``, ``sim_amplitude``,
+                ``sim_frequency_hz``.
         """
         with self._lock:
             return {
@@ -249,6 +300,9 @@ class DataPayloadManager:
                 "ul_fifo_depth": len(self._ul_fifo),
                 "dl_seq": self._dl_seq,
                 "last_ul_seq": self._last_ul_seq,
+                "sim_enabled": self._simulation_enabled,
+                "sim_amplitude": self._sine_amplitude,
+                "sim_frequency_hz": self._sine_frequency_hz,
             }
 
 

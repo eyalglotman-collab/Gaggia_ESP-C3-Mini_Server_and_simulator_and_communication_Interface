@@ -366,6 +366,13 @@
       min-height:0;
     }
 
+    .simulation-layout {
+      display:grid;
+      grid-template-columns:minmax(0, .9fr) minmax(360px, 1.1fr);
+      gap:12px;
+      min-height:0;
+    }
+
     .delay-layout {
       display:flex;
       flex-direction:column;
@@ -916,7 +923,8 @@
       .dashboard-header,
       .operational-layout,
       .lifecycle-layout,
-      .low-level-layout {
+      .low-level-layout,
+      .simulation-layout {
         grid-template-columns:1fr;
       }
 
@@ -1015,6 +1023,7 @@
             <button id="navImportantData" type="button" class="secondary">TELEMETRY &amp; INFO</button>
             <button id="navLowLevelLog" type="button" class="secondary">WiFi Controller low-level LOG</button>
             <button id="navDelayPlot" type="button" class="secondary">SERVER/CLIENT DELAY</button>
+            <button id="navDataSimulation" type="button" class="secondary">SIMULATE DATA</button>
           </div>
         </div>
         <div class="meta-strip">
@@ -1320,6 +1329,51 @@
             </div>
           </div>
         </section>
+
+        <section id="windowDataSimulation" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 6</div>
+              <h2 class="window-title">SIMULATE DATA</h2>
+            </div>
+            <div class="status-inline">
+              <div id="simStatusChip" class="status-chip warn">Simulation Off</div>
+              <div class="status-chip ok">100 Float Samples</div>
+            </div>
+          </div>
+          <div class="window-content">
+            <div class="simulation-layout">
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Generator Control</div>
+                    <h3 class="section-title">Sinus Stream Parameters</h3>
+                    <p class="section-copy">Configure amplitude and frequency for the simulator sine source. The generated sinus fills all 100 float values in each DATA payload.</p>
+                  </div>
+                </div>
+                <div class="row">
+                  <button id="simDataToggleButton" type="button">Start Simulation</button>
+                </div>
+                <div class="config-grid">
+                  <label><span class="label">Amplitude</span><input id="simAmplitude" type="text" value="1.0"></label>
+                  <label><span class="label">Frequency (Hz)</span><input id="simFrequencyHz" type="text" value="1.0"></label>
+                </div>
+                <div class="section-copy">Tip: keep this screen open while using the client "Simulate Data" graph to verify real-time waveform behavior end-to-end.</div>
+              </section>
+
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Live Feedback</div>
+                    <h3 class="section-title">Simulation Telemetry</h3>
+                    <p class="section-copy">These values mirror the active sine settings and downlink packet flow consumed by the client graph screen.</p>
+                  </div>
+                </div>
+                <div id="simulationDataGrid" class="data-grid"></div>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
   </main>
@@ -1357,6 +1411,7 @@
       navImportantData: document.getElementById('navImportantData'),
       navLowLevelLog: document.getElementById('navLowLevelLog'),
       navDelayPlot: document.getElementById('navDelayPlot'),
+      navDataSimulation: document.getElementById('navDataSimulation'),
       zeroMaxDelayButton: document.getElementById('zeroMaxDelayButton'),
       totalErrorsButton: document.getElementById('totalErrorsButton'),
       dashboardHeader: document.querySelector('.dashboard-header'),
@@ -1365,6 +1420,7 @@
       windowImportantData: document.getElementById('windowImportantData'),
       windowLowLevelLog: document.getElementById('windowLowLevelLog'),
       windowDelayPlot: document.getElementById('windowDelayPlot'),
+      windowDataSimulation: document.getElementById('windowDataSimulation'),
       workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
       serverConnectionInteger: document.getElementById('serverConnectionInteger'),
@@ -1379,6 +1435,11 @@
       delayPlotCanvas: document.getElementById('delayPlotCanvas'),
       delayPlotLatestLabel: document.getElementById('delayPlotLatestLabel'),
       delayPlotMaxLabel: document.getElementById('delayPlotMaxLabel'),
+      simDataToggleButton: document.getElementById('simDataToggleButton'),
+      simAmplitude: document.getElementById('simAmplitude'),
+      simFrequencyHz: document.getElementById('simFrequencyHz'),
+      simStatusChip: document.getElementById('simStatusChip'),
+      simulationDataGrid: document.getElementById('simulationDataGrid'),
       flash: document.getElementById('flash'),
       splashOverlay: document.getElementById('splashOverlay'),
       splashAppName: document.getElementById('splashAppName'),
@@ -1430,7 +1491,17 @@
       error: 'Error',
     };
     let configSyncTimer = null;
-    const asyncButtons = ['openButton', 'closeButton', 'releaseComButton', 'applyConfigButton', 'wifiToggleButton', 'resetButton', 'zeroMaxDelayButton', 'totalErrorsButton'];
+    const asyncButtons = [
+      'openButton',
+      'closeButton',
+      'releaseComButton',
+      'applyConfigButton',
+      'wifiToggleButton',
+      'resetButton',
+      'zeroMaxDelayButton',
+      'totalErrorsButton',
+      'simDataToggleButton',
+    ];
     const commandStateMap = {
       resetButton: 'reset',
     };
@@ -1762,6 +1833,7 @@
       elements.navImportantData.classList.toggle('secondary', mode !== 'important-data');
       elements.navLowLevelLog.classList.toggle('secondary', mode !== 'low-level-log');
       elements.navDelayPlot.classList.toggle('secondary', mode !== 'delay-plot');
+      elements.navDataSimulation.classList.toggle('secondary', mode !== 'data-simulation');
     }
 
     function getOffsetTopWithinAncestor(node, ancestor) {
@@ -1800,6 +1872,7 @@
       elements.windowImportantData.classList.toggle('active-window', name === 'important-data');
       elements.windowLowLevelLog.classList.toggle('active-window', name === 'low-level-log');
       elements.windowDelayPlot.classList.toggle('active-window', name === 'delay-plot');
+      elements.windowDataSimulation.classList.toggle('active-window', name === 'data-simulation');
       setNavMode(name);
 
       const target =
@@ -1811,7 +1884,9 @@
               ? elements.windowImportantData
               : name === 'low-level-log'
                 ? elements.windowLowLevelLog
-                : elements.windowDelayPlot;
+                : name === 'delay-plot'
+                  ? elements.windowDelayPlot
+                  : elements.windowDataSimulation;
       scrollGroupToTop(target);
     }
 
@@ -1981,6 +2056,74 @@
       });
     }
 
+    function isSimulationEnabled(snapshot) {
+      const importantData = snapshot?.important_data || {};
+      const stateText = String(importantData['Data Simulation'] || '').trim().toLowerCase();
+      return stateText === 'on' || stateText === 'yes' || stateText === 'enabled';
+    }
+
+    function collectSimulationPayload(includeEnabled = null) {
+      const amplitude = Number(elements.simAmplitude.value);
+      const frequencyHz = Number(elements.simFrequencyHz.value);
+      if (!Number.isFinite(amplitude) || amplitude < 0 || amplitude > 1000) {
+        throw new Error('Amplitude must be a number in range [0, 1000].');
+      }
+      if (!Number.isFinite(frequencyHz) || frequencyHz <= 0 || frequencyHz > 1000) {
+        throw new Error('Frequency must be a number in range (0, 1000].');
+      }
+
+      const payload = {
+        amplitude,
+        frequency_hz: frequencyHz,
+      };
+      if (includeEnabled !== null) {
+        payload.enabled = Boolean(includeEnabled);
+      }
+      return payload;
+    }
+
+    function postSimulationParameterUpdate() {
+      try {
+        post('/api/simulation/config', collectSimulationPayload());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid simulation parameters.';
+        setFlash(message, true);
+      }
+    }
+
+    function renderSimulationData(snapshot) {
+      const importantData = snapshot.important_data || {};
+      const telemetryData = snapshot.telemetry_data || {};
+      const simulationEnabled = isSimulationEnabled(snapshot);
+      const amplitudeText = String(importantData['Simulation Amplitude'] || '1.000');
+      const frequencyText = String(importantData['Simulation Frequency [Hz]'] || '1.000');
+
+      syncInputValue(elements.simAmplitude, amplitudeText);
+      syncInputValue(elements.simFrequencyHz, frequencyText);
+
+      setChipState(elements.simStatusChip, simulationEnabled ? 'ok' : 'warn', simulationEnabled ? 'Simulation On' : 'Simulation Off');
+      elements.simDataToggleButton.textContent = simulationEnabled ? 'Stop Simulation' : 'Start Simulation';
+
+      const cards = [
+        ['Simulation Enabled', simulationEnabled ? 'Yes' : 'No'],
+        ['Amplitude', amplitudeText],
+        ['Frequency [Hz]', frequencyText],
+        ['DL Packets Sent', String(telemetryData['DL Packets Sent'] || '0')],
+        ['DL Sequence', String(telemetryData['DL Sequence'] || '0')],
+        ['UL Packets Received', String(telemetryData['UL Packets Received'] || '0')],
+        ['UL FIFO Depth', String(telemetryData['UL FIFO Depth'] || '0')],
+        ['Last UL Seq', String(telemetryData['Last UL Seq'] || '0')],
+      ];
+
+      elements.simulationDataGrid.innerHTML = '';
+      cards.forEach(([key, value], index) => {
+        const card = document.createElement('div');
+        card.className = `datum${index < 2 ? ' emphasis' : ''}`;
+        card.innerHTML = `<div class="k">${key}</div><div class="v">${value}</div>`;
+        elements.simulationDataGrid.appendChild(card);
+      });
+    }
+
     function renderTotalErrors(snapshot) {
       elements.totalErrorsButton.textContent = `Total Errors = ${Number(snapshot.total_error_count ?? 0)}`;
     }
@@ -2051,6 +2194,7 @@
       renderImportantData(snapshot);
       renderTotalErrors(snapshot);
       renderDelayPlot(snapshot);
+      renderSimulationData(snapshot);
 
       if (Array.isArray(snapshot.logs)) {
         latestLogs = snapshot.logs;
@@ -2176,6 +2320,7 @@
     elements.navImportantData.addEventListener('click', () => activateWindow('important-data'));
     elements.navLowLevelLog.addEventListener('click', () => activateWindow('low-level-log'));
     elements.navDelayPlot.addEventListener('click', () => activateWindow('delay-plot'));
+    elements.navDataSimulation.addEventListener('click', () => activateWindow('data-simulation'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
     elements.releaseComButton.addEventListener('click', () => post('/api/transport/release-com', null, elements.releaseComButton));
@@ -2184,6 +2329,17 @@
     elements.resetButton.addEventListener('click', () => post('/api/command/reset', null, elements.resetButton));
     elements.zeroMaxDelayButton.addEventListener('click', () => post('/api/telemetry/reset-max-delay', null, elements.zeroMaxDelayButton));
     elements.totalErrorsButton.addEventListener('click', () => post('/api/telemetry/reset-total-errors', null, elements.totalErrorsButton));
+    elements.simDataToggleButton.addEventListener('click', () => {
+      const currentEnabled = isSimulationEnabled(latestSnapshot);
+      try {
+        post('/api/simulation/config', collectSimulationPayload(!currentEnabled), elements.simDataToggleButton);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid simulation parameters.';
+        setFlash(message, true);
+      }
+    });
+    elements.simAmplitude.addEventListener('blur', postSimulationParameterUpdate);
+    elements.simFrequencyHz.addEventListener('blur', postSimulationParameterUpdate);
     elements.loggerToggleButton.addEventListener('click', () => {
       setLoggersPaused(!loggerPaused, true);
     });

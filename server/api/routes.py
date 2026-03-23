@@ -32,6 +32,12 @@ class SendDataRequest(BaseModel):
     payload_text: str = Field("espresso_payload", min_length=1, max_length=512)
 
 
+class DataSimulationConfigRequest(BaseModel):
+    enabled: bool | None = None
+    amplitude: float | None = Field(default=None, ge=0.0, le=1000.0)
+    frequency_hz: float | None = Field(default=None, gt=0.0, le=1000.0)
+
+
 def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
     """@brief Execute one simulator action and always return a JSON snapshot.
 
@@ -144,6 +150,20 @@ def command_send_data(request: SendDataRequest | None = None) -> dict[str, objec
 
     payload_text = request.payload_text if request is not None else "espresso_payload"
     return _run_snapshot_action("command_send_data", lambda: link_runtime.send_data(payload_text))
+
+
+@router.post("/simulation/config")
+def update_data_simulation_config(request: DataSimulationConfigRequest) -> dict[str, object]:
+    """@brief Update simulator sine-wave stream settings from Screen 6."""
+
+    return _run_snapshot_action(
+        "update_data_simulation_config",
+        lambda: link_runtime.configure_data_simulation(
+            enabled=request.enabled,
+            amplitude=request.amplitude,
+            frequency_hz=request.frequency_hz,
+        ),
+    )
 
 
 @router.post("/telemetry/reset-total-errors")

@@ -33,6 +33,13 @@ class LinkState(StrEnum):
     ERROR = "error"
 
 
+class DataSimulationEvent(StrEnum):
+    """@brief Client-issued data simulation control events."""
+
+    ON = "datasimulationon"
+    OFF = "datasimulationoff"
+
+
 STATE_DISPLAY_NAMES = {
     LinkState.RESET: "Reset",
     LinkState.INITIALIZE: "Initialize",
@@ -612,6 +619,57 @@ class LinkRuntime:
             details += f" req={req}"
         return details
 
+    @staticmethod
+    def _try_parse_float_payload_value(payload_text: str, key_text: str) -> float | None:
+        """@brief Parse one float value from a semicolon-delimited payload."""
+
+        key_prefix = f"{key_text}="
+        for token in payload_text.split(";"):
+            token = token.strip()
+            if not token.startswith(key_prefix):
+                continue
+            raw_value = token[len(key_prefix):].strip()
+            if not raw_value:
+                continue
+            try:
+                return float(raw_value)
+            except ValueError:
+                return None
+        return None
+
+    def _handle_client_data_command_locked(self, payload_text: str) -> None:
+        """@brief Apply client DATA text commands to simulator data generation.
+
+        @details The client sends `DataSimulationOn` / `DataSimulationOFF` over
+        the DATA channel. This handler toggles the sine generator and accepts
+        optional `amp` and `freq` parameters when present.
+        """
+
+        normalized = payload_text.strip().lower()
+        if not normalized:
+            return
+
+        if normalized.startswith(DataSimulationEvent.ON.value):
+            amplitude = self._try_parse_float_payload_value(normalized, "amp")
+            if amplitude is None:
+                amplitude = self._try_parse_float_payload_value(normalized, "amplitude")
+            frequency_hz = self._try_parse_float_payload_value(normalized, "freq")
+            if frequency_hz is None:
+                frequency_hz = self._try_parse_float_payload_value(normalized, "frequency_hz")
+
+            data_payload_manager.configure_sine(amplitude=amplitude, frequency_hz=frequency_hz)
+            data_payload_manager.set_simulation_enabled(True)
+            sim_stats = data_payload_manager.get_stats()
+            self._append_log(
+                "Client event DataSimulationOn accepted "
+                f"(amp={sim_stats['sim_amplitude']:.3f}, freq={sim_stats['sim_frequency_hz']:.3f} Hz)."
+            )
+            return
+
+        if normalized.startswith(DataSimulationEvent.OFF.value):
+            data_payload_manager.set_simulation_enabled(False)
+            self._append_log("Client event DataSimulationOFF accepted.")
+
     def _poll_received_frames_locked(self) -> None:
         """@brief Consume received frames and advance the server-side states.
 
@@ -725,9 +783,9 @@ class LinkRuntime:
                         # Binary uplink data packet — route to FIFO for app consumption.
                         data_payload_manager.receive_uplink(bytes(frame.payload))
                     else:
-                        self._last_received_client_text = (
-                            frame.payload.decode("utf-8", errors="replace") or "Empty client payload"
-                        )
+                        received_text = frame.payload.decode("utf-8", errors="replace").strip()
+                        self._last_received_client_text = received_text or "Empty client payload"
+                        self._handle_client_data_command_locked(received_text)
                     continue
 
             if payload_text == "connect_ack":
@@ -1171,6 +1229,53 @@ class LinkRuntime:
             self._set_state(self._current_state, "Send-data command issued during keepalive.")
             return self._snapshot_locked()
 
+    def configure_data_simulation(
+        self,
+        *,
+        enabled: bool | None = None,
+        amplitude: float | None = None,
+        frequency_hz: float | None = None,
+    ) -> LinkSnapshot:
+        """@brief Update simulator sine-wave generator controls from the UI.
+
+        @details This command surface is used by the dedicated simulator
+        `Screen 6` control panel. The binary downlink sender still emits only
+        while keepalive is active; enabling simulation ahead of keepalive is
+        allowed and will start transmitting automatically once the session is
+        ready.
+
+        @param enabled      Optional stream enable flag.
+        @param amplitude    Optional sine amplitude value.
+        @param frequency_hz Optional sine frequency in Hz.
+        """
+
+        # Keep this control path side-effect free for transport state:
+        # UI parameter edits must not consume RX frames or advance the
+        # lifecycle state machine.
+        data_payload_manager.configure_sine(
+            amplitude=amplitude,
+            frequency_hz=frequency_hz,
+        )
+        if enabled is not None:
+            data_payload_manager.set_simulation_enabled(enabled)
+        sim_stats = data_payload_manager.get_stats()
+
+        with self._lock:
+            if enabled is None:
+                self._append_log(
+                    "Screen 6 updated simulation parameters "
+                    f"(amp={sim_stats['sim_amplitude']:.3f}, "
+                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz)."
+                )
+            else:
+                self._append_log(
+                    "Screen 6 set simulation "
+                    f"{'ON' if sim_stats['sim_enabled'] else 'OFF'} "
+                    f"(amp={sim_stats['sim_amplitude']:.3f}, "
+                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz)."
+                )
+            return self._snapshot_locked()
+
     def send_downlink_data_packet(self, payload: bytes) -> None:
         """@brief Send one binary downlink data packet if the session is active.
 
@@ -1239,6 +1344,7 @@ class LinkRuntime:
     def _snapshot_locked(self, *, include_logs: bool = True) -> LinkSnapshot:
         transport_snapshot: SerialLinkSnapshot = serial_link_manager.get_snapshot()
         self._update_usb_throughput_locked(transport_snapshot)
+        dp_stats = data_payload_manager.get_stats()
         esp32c3_connected = bool(transport_snapshot.port_open and self._bridge_ready)
         if not transport_snapshot.port_open:
             esp32c3_link_state = "disconnected"
@@ -1270,6 +1376,9 @@ class LinkRuntime:
             "BottomLayer Checksum Errors": str(self._bottom_layer_checksum_error_count),
             "BottomLayer Sequence Errors": str(self._bottom_layer_sequence_error_count),
             "Text Received From Client": self._last_received_client_text,
+            "Data Simulation": "On" if dp_stats["sim_enabled"] else "Off",
+            "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
+            "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
             "Wi-Fi Timeout (ms)": str(self._config.wifi_connect_timeout_ms),
             "TCP Timeout (ms)": str(self._config.tcp_connect_timeout_ms),
             "Keepalive Period (ms)": str(self._config.keepalive_period_ms),
@@ -1300,7 +1409,6 @@ class LinkRuntime:
             pkt_loss = f"{loss_x10 // 10}.{loss_x10 % 10}%"
         else:
             pkt_loss = "0.0%"
-        dp_stats = data_payload_manager.get_stats()
         telemetry_data = {
             "Session Uptime": session_uptime,
             "Keepalive REQ Received": str(self._keepalive_req_count),
@@ -1320,6 +1428,9 @@ class LinkRuntime:
             "USB Total Throughput [kB/s]": f"{self._usb_total_kbytes_per_sec:.2f}",
             "DL Packets Sent": str(dp_stats["dl_tx_count"]),
             "DL Sequence": str(dp_stats["dl_seq"]),
+            "Simulation Enabled": "Yes" if dp_stats["sim_enabled"] else "No",
+            "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
+            "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
             "UL Packets Received": str(dp_stats["ul_rx_count"]),
             "UL Packets Dropped": str(dp_stats["ul_drop_count"]),
             "UL FIFO Depth": str(dp_stats["ul_fifo_depth"]),
