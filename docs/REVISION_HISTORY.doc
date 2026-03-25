@@ -2,11 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.3.0\par
+- Version: 0.3.1\par
 - Bridge Firmware Version: 0.1.24\par
-- Summary: Minor version release checkpoint: promoted simulator app version to 0.3.0 while keeping bridge firmware version unchanged at 0.1.24.\par
+- Summary: Patch release: aligned simulator API tests with the active runtime contract and refreshed README API/rule guidance.\par
 \par
 \b X=0, Y=3\b0\par
+\b 2026-03-25 14:00:00\b0\par
+- Version: 0.3.1\par
+- Firmware Version: 0.1.24\par
+- Summary: Synchronized simulator tests with the active runtime state contract and refreshed README API/rule documentation.\par
+- Notes: `tests/test_simulator_api.py` now validates current split keepalive states (`keepalive_server_send`/`keepalive_client_return`) and current snapshot fields (`ServerLiveInteger`/`ClientLiveInteger`) while removing stale assertions tied to retired state names and keys. Verified with `20 passed` on `tests/test_simulator_api.py`. `README.md` now lists `/api/simulation/config`, `/api/telemetry/reset-total-errors`, and `/api/telemetry/reset-max-delay`, and narrows executable approvals to scoped workspace tools instead of blanket arbitrary `.exe` approval.\par
+\par
 \b 2026-03-23 15:20:00\b0\par
 - Version: 0.3.0\par
 - Firmware Version: 0.1.24\par

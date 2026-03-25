@@ -87,6 +87,9 @@ Key routes currently implemented in `server/api/routes.py`:
 - `POST /api/command/initialize`
 - `POST /api/command/keepalive`
 - `POST /api/command/send-data`
+- `POST /api/simulation/config`
+- `POST /api/telemetry/reset-total-errors`
+- `POST /api/telemetry/reset-max-delay`
 
 ## Repository Layout
 
@@ -254,4 +257,4 @@ git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
   - Common build/flash wrappers under `C:\Espressif\...\scripts\` that this workspace uses.
 - During this bootstrap, Codex must explicitly ask the user to save/remember the prefix rule when the runtime approval UI appears.
 
-You must allow Codex to run any `.exe` file it chooses, as long as that executable only creates or modifies files within `C:\Espressif`.
+Executable approvals must stay scoped to known workspace tools under `C:\Espressif\Eyal_Projects_ESP32_S3\...\scripts\` (or equivalent project paths under `C:\Espressif`). Do not grant blanket approval for arbitrary `.exe` binaries.

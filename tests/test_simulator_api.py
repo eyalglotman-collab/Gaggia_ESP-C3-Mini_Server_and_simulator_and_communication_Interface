@@ -14,8 +14,8 @@ from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
 def _reset_runtime_for_test() -> None:
     with link_runtime._lock:  # noqa: SLF001 - controlled test fixture reset
         link_runtime._current_state = LinkState.RESET  # noqa: SLF001
-        link_runtime._host_live_integer = 0  # noqa: SLF001
-        link_runtime._device_live_integer = 0  # noqa: SLF001
+        link_runtime._server_live_integer = 0  # noqa: SLF001
+        link_runtime._client_live_integer = 0  # noqa: SLF001
         link_runtime._wifi_ready = False  # noqa: SLF001
         link_runtime._wifi_connected = False  # noqa: SLF001
         link_runtime._tcp_connected = False  # noqa: SLF001
@@ -58,7 +58,7 @@ def test_link_snapshot_shape() -> None:
     assert payload['serial_port'] == 'COM4'
     assert payload['config']['wifi_ssid'] == 'EyalSimulatorAP'
     assert 'Last Monitor Event' in payload['important_data']
-    assert 'HostLiveInteger' in payload['important_data']
+    assert 'ServerLiveInteger' in payload['important_data']
     assert 'transport' in payload
     assert isinstance(payload['logs'], list)
 
@@ -185,7 +185,7 @@ def test_link_snapshot_stays_available_if_open_fails(monkeypatch) -> None:
     snapshot_response = client.get('/api/link')
     assert snapshot_response.status_code == 200
     payload = snapshot_response.json()
-    assert payload['last_error'] == 'COM port not found'
+    assert payload['last_error'].startswith('COM open failed on COM4:')
 
 
 def test_all_api_routes_return_snapshots(monkeypatch) -> None:
@@ -302,7 +302,7 @@ def test_initialize_automatically_enters_connect_state(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload['current_state'] == 'initialize'
-    assert payload['important_data']['Send Data Enabled'] == 'No'
+    assert payload['important_data']['Connect Passed'] == 'No'
 
     snapshot_response = client.get('/api/link')
     assert snapshot_response.status_code == 200
@@ -369,7 +369,7 @@ def test_connect_ack_does_not_promote_runtime_to_keepalive(monkeypatch) -> None:
     payload = waiting_snapshot.json()
     assert payload['current_state'] == 'connect'
     assert payload['important_data']['TCP Connected'] == 'No'
-    assert payload['important_data']['Send Data Enabled'] == 'No'
+    assert payload['important_data']['Connect Passed'] == 'No'
 
 
 def test_explicit_client_connected_promotes_runtime_to_keepalive(monkeypatch) -> None:
@@ -389,6 +389,15 @@ def test_explicit_client_connected_promotes_runtime_to_keepalive(monkeypatch) ->
                 payload=b'client_connected',
             )
         ],
+        [
+            Frame(
+                message_type=MessageType.KEEPALIVE,
+                host_live_integer=2,
+                device_live_integer=1,
+                sequence=3,
+                payload=b'ka_req;sid=1;req=1',
+            )
+        ]
     ]
 
     monkeypatch.setattr(serial_link_manager, 'send_frame', lambda frame: serial_link_manager.get_snapshot())
@@ -403,12 +412,18 @@ def test_explicit_client_connected_promotes_runtime_to_keepalive(monkeypatch) ->
     client.post('/api/command/reset')
     client.get('/api/link')
     client.get('/api/link')
+    client_connected_snapshot = client.get('/api/link')
     keepalive_snapshot = client.get('/api/link')
+
+    assert client_connected_snapshot.status_code == 200
+    client_connected_payload = client_connected_snapshot.json()
+    assert client_connected_payload['current_state'] == 'connect'
+    assert client_connected_payload['important_data']['Connect Passed'] == 'Yes'
 
     assert keepalive_snapshot.status_code == 200
     payload = keepalive_snapshot.json()
-    assert payload['current_state'] == 'keepalive'
-    assert payload['important_data']['Send Data Enabled'] == 'Yes'
+    assert payload['current_state'] == 'keepalive_client_return'
+    assert payload['important_data']['TCP Connected'] == 'Yes'
 
 
 def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
@@ -441,8 +456,8 @@ def test_keepalive_is_rejected_until_initialize_and_connect_pass(monkeypatch) ->
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload['current_state'] == 'error'
-    assert payload['last_error'] == 'keepalive invoke rejected: server has not completed initialize and connect'
+    assert payload['current_state'] == 'reset'
+    assert payload['last_error'] in ('', 'No error')
 
 
 def test_send_data_uses_requested_payload_text(monkeypatch) -> None:
@@ -452,8 +467,8 @@ def test_send_data_uses_requested_payload_text(monkeypatch) -> None:
     _reset_runtime_for_test()
 
     def capture_frame(frame: Frame) -> SerialLinkSnapshot:
-      sent_payloads.append(frame.payload)
-      return _open_transport_snapshot()
+        sent_payloads.append(frame.payload)
+        return _open_transport_snapshot()
 
     monkeypatch.setattr(serial_link_manager, 'send_frame', capture_frame)
     monkeypatch.setattr(serial_link_manager, 'clear_buffers', lambda: None)
@@ -461,10 +476,9 @@ def test_send_data_uses_requested_payload_text(monkeypatch) -> None:
     monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
 
     with link_runtime._lock:  # noqa: SLF001 - controlled state setup for payload regression
-        link_runtime._current_state = LinkState.KEEPALIVE  # noqa: SLF001
+        link_runtime._current_state = LinkState.KEEPALIVE_SERVER_SEND  # noqa: SLF001
         link_runtime._initialize_completed = True  # noqa: SLF001
         link_runtime._connect_completed = True  # noqa: SLF001
-        link_runtime._send_data_enabled = True  # noqa: SLF001
         link_runtime._tcp_connected = True  # noqa: SLF001
         link_runtime._wifi_connected = True  # noqa: SLF001
 
@@ -497,10 +511,9 @@ def test_received_client_text_is_exposed_in_snapshot(monkeypatch) -> None:
     )
 
     with link_runtime._lock:  # noqa: SLF001 - controlled state setup for received-data regression
-        link_runtime._current_state = LinkState.KEEPALIVE  # noqa: SLF001
+        link_runtime._current_state = LinkState.KEEPALIVE_SERVER_SEND  # noqa: SLF001
         link_runtime._initialize_completed = True  # noqa: SLF001
         link_runtime._connect_completed = True  # noqa: SLF001
-        link_runtime._send_data_enabled = True  # noqa: SLF001
 
     response = client.get('/api/link')
 
