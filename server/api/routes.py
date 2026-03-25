@@ -36,6 +36,7 @@ class DataSimulationConfigRequest(BaseModel):
     enabled: bool | None = None
     amplitude: float | None = Field(default=None, ge=0.0, le=1000.0)
     frequency_hz: float | None = Field(default=None, gt=0.0, le=1000.0)
+    packet_interval_ms: int | None = Field(default=None, ge=10, le=200)
 
 
 def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
@@ -162,6 +163,7 @@ def update_data_simulation_config(request: DataSimulationConfigRequest) -> dict[
             enabled=request.enabled,
             amplitude=request.amplitude,
             frequency_hz=request.frequency_hz,
+            packet_interval_ms=request.packet_interval_ms,
         ),
     )
 

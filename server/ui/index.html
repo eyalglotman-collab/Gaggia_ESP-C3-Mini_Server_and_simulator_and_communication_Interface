@@ -1339,6 +1339,7 @@
             </div>
             <div class="status-inline">
               <div id="simStatusChip" class="status-chip warn">Simulation Off</div>
+              <div id="startBrewChip" class="status-chip warn">StartBrew Idle</div>
               <div class="status-chip ok">100 Float Samples</div>
             </div>
           </div>
@@ -1349,7 +1350,7 @@
                   <div>
                     <div class="section-kicker">Generator Control</div>
                     <h3 class="section-title">Sinus Stream Parameters</h3>
-                    <p class="section-copy">Configure amplitude and frequency for the simulator sine source. The generated sinus fills all 100 float values in each DATA payload.</p>
+                    <p class="section-copy">Configure sine parameters for manual simulation, or send StartBrew from the client to stream brew-profile packets (pressure/flow/temperature arrays, 10 samples each).</p>
                   </div>
                 </div>
                 <div class="row">
@@ -1358,6 +1359,8 @@
                 <div class="config-grid">
                   <label><span class="label">Amplitude</span><input id="simAmplitude" type="text" value="1.0"></label>
                   <label><span class="label">Frequency (Hz)</span><input id="simFrequencyHz" type="text" value="1.0"></label>
+                  <label><span class="label">Packet Interval [mSec]</span><input id="simPacketIntervalMs" type="text" value="20"></label>
+                  <label><span class="label">Data Throughput [kByte/Sec]</span><input id="simDataThroughputKByteSec" type="text" value="20.000" readonly></label>
                 </div>
                 <div class="section-copy">Tip: keep this screen open while using the client "Simulate Data" graph to verify real-time waveform behavior end-to-end.</div>
               </section>
@@ -1367,7 +1370,7 @@
                   <div>
                     <div class="section-kicker">Live Feedback</div>
                     <h3 class="section-title">Simulation Telemetry</h3>
-                    <p class="section-copy">These values mirror the active sine settings and downlink packet flow consumed by the client graph screen.</p>
+                    <p class="section-copy">These values mirror active simulation or StartBrew runtime telemetry consumed by the client Plot screen.</p>
                   </div>
                 </div>
                 <div id="simulationDataGrid" class="data-grid"></div>
@@ -1439,7 +1442,10 @@
       simDataToggleButton: document.getElementById('simDataToggleButton'),
       simAmplitude: document.getElementById('simAmplitude'),
       simFrequencyHz: document.getElementById('simFrequencyHz'),
+      simPacketIntervalMs: document.getElementById('simPacketIntervalMs'),
+      simDataThroughputKByteSec: document.getElementById('simDataThroughputKByteSec'),
       simStatusChip: document.getElementById('simStatusChip'),
+      startBrewChip: document.getElementById('startBrewChip'),
       simulationDataGrid: document.getElementById('simulationDataGrid'),
       flash: document.getElementById('flash'),
       splashOverlay: document.getElementById('splashOverlay'),
@@ -1510,6 +1516,9 @@
       resetButton: 'reset',
     };
     const backendRequestTimeoutMs = 4000;
+    const SIM_FLOAT_BYTES_PER_PACKET = 100 * 4;
+    const SIM_PACKET_INTERVAL_MIN_MS = 10;
+    const SIM_PACKET_INTERVAL_MAX_MS = 200;
     let backendErrorPopupDigest = '';
 
     function hideBackendErrorPopup() {
@@ -2101,9 +2110,37 @@
       return stateText === 'on' || stateText === 'yes' || stateText === 'enabled';
     }
 
+    function calculateSimulationThroughputKByteSec(packetIntervalMs) {
+      const intervalMs = Number(packetIntervalMs);
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0) return NaN;
+      const bytesPerSecond = SIM_FLOAT_BYTES_PER_PACKET * (1000 / intervalMs);
+      return bytesPerSecond / 1000;
+    }
+
+    function renderSimulationThroughputFromInput() {
+      const throughputKByteSec = calculateSimulationThroughputKByteSec(elements.simPacketIntervalMs.value);
+      if (!Number.isFinite(throughputKByteSec)) {
+        elements.simDataThroughputKByteSec.value = '';
+        return;
+      }
+      elements.simDataThroughputKByteSec.value = throughputKByteSec.toFixed(3);
+    }
+
+    function parseSimulationPacketIntervalMs(rawValue) {
+      const packetIntervalMs = Number(rawValue);
+      if (!Number.isFinite(packetIntervalMs) || !Number.isInteger(packetIntervalMs)) {
+        throw new Error('Packet interval must be an integer in range [10, 200] mSec.');
+      }
+      if (packetIntervalMs < SIM_PACKET_INTERVAL_MIN_MS || packetIntervalMs > SIM_PACKET_INTERVAL_MAX_MS) {
+        throw new Error('Packet interval must be an integer in range [10, 200] mSec.');
+      }
+      return packetIntervalMs;
+    }
+
     function collectSimulationPayload(includeEnabled = null) {
       const amplitude = Number(elements.simAmplitude.value);
       const frequencyHz = Number(elements.simFrequencyHz.value);
+      const packetIntervalMs = parseSimulationPacketIntervalMs(elements.simPacketIntervalMs.value);
       if (!Number.isFinite(amplitude) || amplitude < 0 || amplitude > 1000) {
         throw new Error('Amplitude must be a number in range [0, 1000].');
       }
@@ -2114,6 +2151,7 @@
       const payload = {
         amplitude,
         frequency_hz: frequencyHz,
+        packet_interval_ms: packetIntervalMs,
       };
       if (includeEnabled !== null) {
         payload.enabled = Boolean(includeEnabled);
@@ -2136,17 +2174,37 @@
       const simulationEnabled = isSimulationEnabled(snapshot);
       const amplitudeText = String(importantData['Simulation Amplitude'] || '1.000');
       const frequencyText = String(importantData['Simulation Frequency [Hz]'] || '1.000');
+      const packetIntervalText = String(importantData['Packet Interval [mSec]'] || '20');
+      const throughputKByteSec = calculateSimulationThroughputKByteSec(packetIntervalText);
+      const throughputText = Number.isFinite(throughputKByteSec)
+        ? throughputKByteSec.toFixed(3)
+        : String(importantData['Data Throughput [kByte/Sec]'] || '0.000');
+      const startBrewActive = String(importantData['StartBrew Event'] || 'Off').trim().toLowerCase() === 'on';
+      const brewProfile = String(importantData['Brew Profile'] || 'Profile 1');
+      const brewElapsedSec = String(importantData['Brew Elapsed [Sec]'] || '0.0');
+      const brewTimeSec = String(importantData['Brew Time [Sec]'] || '0.0');
+      const brewRemainingSec = String(importantData['Brew Remaining [Sec]'] || '0.0');
 
       syncInputValue(elements.simAmplitude, amplitudeText);
       syncInputValue(elements.simFrequencyHz, frequencyText);
+      syncInputValue(elements.simPacketIntervalMs, packetIntervalText);
+      elements.simDataThroughputKByteSec.value = throughputText;
 
       setChipState(elements.simStatusChip, simulationEnabled ? 'ok' : 'warn', simulationEnabled ? 'Simulation On' : 'Simulation Off');
+      setChipState(elements.startBrewChip, startBrewActive ? 'ok' : 'warn', startBrewActive ? 'StartBrew Active' : 'StartBrew Idle');
       elements.simDataToggleButton.textContent = simulationEnabled ? 'Stop Simulation' : 'Start Simulation';
 
       const cards = [
         ['Simulation Enabled', simulationEnabled ? 'Yes' : 'No'],
+        ['StartBrew Event', startBrewActive ? 'On' : 'Off'],
+        ['Brew Profile', brewProfile],
+        ['Brew Elapsed [Sec]', brewElapsedSec],
+        ['Brew Time [Sec]', brewTimeSec],
+        ['Brew Remaining [Sec]', brewRemainingSec],
         ['Amplitude', amplitudeText],
         ['Frequency [Hz]', frequencyText],
+        ['Packet Interval [mSec]', packetIntervalText],
+        ['Data Throughput [kByte/Sec]', throughputText],
         ['DL Packets Sent', String(telemetryData['DL Packets Sent'] || '0')],
         ['DL Sequence', String(telemetryData['DL Sequence'] || '0')],
         ['UL Packets Received', String(telemetryData['UL Packets Received'] || '0')],
@@ -2389,6 +2447,8 @@
     });
     elements.simAmplitude.addEventListener('blur', postSimulationParameterUpdate);
     elements.simFrequencyHz.addEventListener('blur', postSimulationParameterUpdate);
+    elements.simPacketIntervalMs.addEventListener('blur', postSimulationParameterUpdate);
+    elements.simPacketIntervalMs.addEventListener('input', renderSimulationThroughputFromInput);
     elements.loggerToggleButton.addEventListener('click', () => {
       setLoggersPaused(!loggerPaused, true);
     });
@@ -2421,6 +2481,7 @@
     setLoggersPaused(false);
     updateLoggerFilter();
     updateLowLevelLoggerFilter();
+    renderSimulationThroughputFromInput();
     loadSplashInfo();
     hideSplashAfterTimeout();
     refresh();

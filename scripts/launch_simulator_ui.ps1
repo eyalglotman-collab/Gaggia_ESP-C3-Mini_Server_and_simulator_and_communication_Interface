@@ -1,12 +1,11 @@
 <#
 .SYNOPSIS
-Starts the simulator backend and offers to open the UI in a browser.
+Starts the simulator backend and launches the UI in a browser.
 
 .DESCRIPTION
 Runs the manual-launch flow inside the single PowerShell session opened by the
 batch wrapper, waits for the simulator health endpoint to report ready, and
-then shows a Yes/No message box asking whether to open the simulator in a fresh
-browser session using a cache-busting URL.
+then opens the simulator in a fresh browser session using a cache-busting URL.
 
 .PARAMETER HostName
 Bind address for the simulator backend.
@@ -19,13 +18,17 @@ Enables backend auto-reload for development.
 
 .PARAMETER StartupTimeoutSec
 Maximum time to wait for the backend health check to succeed before failing.
+
+.PARAMETER NoBrowser
+Skips browser launch after backend startup.
 #>
 [CmdletBinding()]
 param(
     [string]$HostName = '127.0.0.1',
     [int]$Port = 8000,
     [switch]$Reload,
-    [int]$StartupTimeoutSec = 20
+    [int]$StartupTimeoutSec = 20,
+    [switch]$NoBrowser
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -83,31 +86,19 @@ function Wait-ForBackendHealth {
     throw "Simulator backend did not become healthy within $StartupTimeoutSec seconds."
 }
 
-# @brief Ask whether to open a fresh browser session for the simulator UI.
-# @details Uses a Yes/No Windows message box after backend readiness succeeds.
-# The browser launch uses a cache-busting query string rather than attempting a
-# global browser-cache wipe.
+# @brief Open a fresh browser session for the simulator UI.
+# @details Uses a cache-busting query string rather than attempting a global
+# browser-cache wipe.
 # @param[in] UiUrlBase Simulator UI base URL.
-function Show-BrowserPrompt {
+function Start-SimulatorBrowser {
     param(
         [Parameter(Mandatory = $true)]
         [string]$UiUrlBase
     )
 
-    Add-Type -AssemblyName System.Windows.Forms
-    $message = "The simulator has loaded.`n`nDo you want to open it in a fresh browser session with a cache-busting URL?"
-    $title = "Simulator Loaded"
-    $result = [System.Windows.Forms.MessageBox]::Show(
-        $message,
-        $title,
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    )
-
-    if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-        $url = $UiUrlBase + '?ts=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        Start-Process $url | Out-Null
-    }
+    $url = $UiUrlBase + '?ts=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Write-Host "Opening simulator web client: $url"
+    Start-Process $url | Out-Null
 }
 
 if (-not (Test-Path $BackendScript)) {
@@ -165,4 +156,9 @@ try {
     exit 1
 }
 
-Show-BrowserPrompt -UiUrlBase $UiUrlBase
+if ($NoBrowser.IsPresent) {
+    Write-Host "Backend launched. Browser launch skipped (-NoBrowser)."
+    exit 0
+}
+
+Start-SimulatorBrowser -UiUrlBase $UiUrlBase

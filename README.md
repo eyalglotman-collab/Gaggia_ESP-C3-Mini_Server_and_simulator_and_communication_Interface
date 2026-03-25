@@ -158,15 +158,20 @@ The repository also contains related helper scripts:
 
 ### Bridge Firmware Build and Flash
 
-You must build and flash bridge firmware through `cmd.exe` with an absolute forward-slash path.
+This is the ONLY approved bridge flash method:
 
 ```bash
-cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd build
-cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> flash
+cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> build flash
 ```
 
-You must run build and flash sequentially, with `build` first and `flash` second.
-For Codex/WSL sessions, this absolute-path `cmd.exe` method is the required build and flash path.
+Mandatory rules:
+
+- Use exactly the command above for every bridge flash task.
+- Do not split flashing into separate commands.
+- Do not use `scripts/flash_hidden.ps1`.
+- Do not use `scripts/idfw.ps1`.
+- Do not use direct `idf.py` commands.
+- Do not use PowerShell `Start-Process` wrappers for flashing.
 
 ## Rule-Gated Execution Sequence (Mandatory)
 
@@ -174,7 +179,7 @@ For every verification/build/flash task, Codex/Claude must use this exact gated 
 
 1. Gate 1: quick compliance check of `AGENTS.md`, `README.md`, and `CLAUDE.md`.
 2. Gate 2: run `scripts/start_wait_sound.ps1`.
-3. Gate 3: execute requested build/flash actions sequentially only (no parallel flashing).
+3. Gate 3: execute the single approved flash command above (no alternatives and no parallel flashing).
 4. Gate 4: run `scripts/stop_wait_sound.ps1`.
 5. Gate 5: on successful completion, run `scripts/play_build_success_sound.ps1`.
 
@@ -183,44 +188,9 @@ Post-flash monitor capture is optional and only required when explicitly request
 If any gate fails, the sequence is non-compliant and execution must stop immediately with:
 `RULE-GATED SEQUENCE BROKEN: <gate>`.
 
-### Claude Code Build Verification (non-interactive shell limitation)
+### Flash Enforcement Note
 
-When running inside Claude Code's bash shell, Windows console programs (`idf.py`, `ninja`) write output
-to the Windows console buffer rather than the pipe, so no build output is visible and output capture
-via `2>&1` or PowerShell redirects does not work. If the binary timestamp does not update after running
-the build command, the build did not reach ninja.
-
-**Confirmed working method from Claude Code's shell** (clears MSYSTEM, uses -NoNewWindow to pipe output):
-
-Build:
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd build' -Wait -NoNewWindow -PassThru"
-```
-
-Flash:
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c set MSYSTEM=& C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\idfw.cmd -p COM4 flash' -Wait -NoNewWindow -PassThru"
-```
-
-If these fail, ask Eyal to run `idfw.cmd build` or `idfw.cmd -p COM4 flash` from a real CMD or VS Code integrated terminal and report back.
-
-Otherwise verify the build result using these checks instead of looking at idf.py output:
-
-**1. Check the binary exists and has a recent timestamp:**
-```bash
-ls -la .idfbuild/esp32c3_bridge/eyal_espresso_c3_bridge.bin
-```
-
-**2. Confirm no source changes since the last known-good build:**
-```bash
-git diff <last-good-commit> HEAD -- firmware/esp32c3_bridge/main/
-```
-If the diff is empty, the existing binary in `.idfbuild/esp32c3_bridge/` is valid and up to date.
-
-**3. Play the build success sound after confirming a valid binary:**
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\play_build_success_sound.ps1
-```
+If flashing fails, retry using the same approved command only. Do not switch to an alternative flash path.
 
 ## Current Architectural Intent
 

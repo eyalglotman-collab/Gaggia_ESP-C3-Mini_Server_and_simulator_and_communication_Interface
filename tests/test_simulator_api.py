@@ -95,6 +95,7 @@ def test_simulation_config_route_updates_snapshot() -> None:
             'enabled': True,
             'amplitude': 2.5,
             'frequency_hz': 3.0,
+            'packet_interval_ms': 100,
         },
     )
     assert response.status_code == 200
@@ -102,6 +103,8 @@ def test_simulation_config_route_updates_snapshot() -> None:
     assert payload['important_data']['Data Simulation'] == 'On'
     assert payload['important_data']['Simulation Amplitude'] == '2.500'
     assert payload['important_data']['Simulation Frequency [Hz]'] == '3.000'
+    assert payload['important_data']['Packet Interval [mSec]'] == '100'
+    assert payload['important_data']['Data Throughput [kByte/Sec]'] == '4.000'
 
 
 def test_open_port_reports_already_open(monkeypatch) -> None:
@@ -213,6 +216,7 @@ def test_all_api_routes_return_snapshots(monkeypatch) -> None:
             'enabled': True,
             'amplitude': 1.0,
             'frequency_hz': 1.0,
+            'packet_interval_ms': 20,
         }),
         ('post', '/api/transport/open', {'port_name': 'COM4'}),
         ('post', '/api/transport/close', None),
@@ -439,8 +443,9 @@ def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload['current_state'] == 'error'
-    assert payload['last_error'] == 'send data invoke rejected: server has not completed initialize and connect'
+    assert payload['current_state'] == 'reset'
+    assert payload['last_error'] in ('', 'No error')
+    assert any('send data ignored because keepalive-ready connection is not available yet'.lower() in line.lower() for line in payload['logs'])
 
 
 def test_keepalive_is_rejected_until_initialize_and_connect_pass(monkeypatch) -> None:

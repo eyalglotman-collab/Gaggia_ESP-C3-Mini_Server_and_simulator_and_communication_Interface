@@ -50,6 +50,9 @@ class DataSimulationEvent(StrEnum):
 
     ON = "datasimulationon"
     OFF = "datasimulationoff"
+    START_BREW = "startbrew"
+    STOP_BREW = "stopbrew"
+    PROFILE_SELECTION = "profileselection"
 
 
 STATE_DISPLAY_NAMES = {
@@ -166,6 +169,7 @@ class LinkRuntime:
         self._initialize_completed = False
         self._connect_completed = False
         self._last_received_client_text = "No client text received yet."
+        self._last_brew_active = False
         # --- Enhanced telemetry counters ---
         self._session_started_at: datetime | None = None
         self._keepalive_req_count: int = 0
@@ -279,6 +283,7 @@ class LinkRuntime:
         self._running_integer_seeded = False
         self._last_running_integer_rx_at = None
         self._last_received_client_text = "No client text received yet."
+        self._last_brew_active = False
 
     def _clear_connection_fault_locked(self) -> None:
         """@brief Clear the connection-fault latch after a valid keepalive exchange.
@@ -696,13 +701,56 @@ class LinkRuntime:
     def _handle_client_data_command_locked(self, payload_text: str) -> None:
         """@brief Apply client DATA text commands to simulator data generation.
 
-        @details The client sends `DataSimulationOn` / `DataSimulationOFF` over
-        the DATA channel. This handler toggles the sine generator and accepts
-        optional `amp` and `freq` parameters when present.
+        @details The client sends command-like DATA payloads such as
+        `ProfileSelection`, `StartBrew`, and `DataSimulationOn`.
         """
 
         normalized = payload_text.strip().lower()
         if not normalized:
+            return
+
+        if normalized.startswith(DataSimulationEvent.PROFILE_SELECTION.value):
+            profile_id = self._try_parse_u32_payload_value(normalized, "profile")
+            if profile_id is None:
+                profile_id = self._try_parse_u32_payload_value(normalized, "id")
+            offline_value = self._try_parse_u32_payload_value(normalized, "offline")
+            data_payload_manager.select_profile(
+                profile_id=profile_id,
+                offline=(offline_value is not None and offline_value != 0),
+            )
+            sim_stats = data_payload_manager.get_stats()
+            self._append_log(
+                "Client event ProfileSelection accepted "
+                f"(profile={sim_stats['brew_profile_id']}:{sim_stats['brew_profile_name']})."
+            )
+            return
+
+        if normalized.startswith(DataSimulationEvent.START_BREW.value):
+            profile_id = self._try_parse_u32_payload_value(normalized, "profile")
+            packet_interval_ms = self._try_parse_u32_payload_value(normalized, "packet_interval_ms")
+            if packet_interval_ms is None:
+                packet_interval_ms = self._try_parse_u32_payload_value(normalized, "int_ms")
+            data_payload_manager.start_brew(profile_id=profile_id, packet_interval_ms=packet_interval_ms)
+            sim_stats = data_payload_manager.get_stats()
+            self._append_log(
+                "Client event StartBrew accepted "
+                f"(profile={sim_stats['brew_profile_id']}, "
+                f"brew_time={sim_stats['brew_time_sec']:.1f}s, "
+                f"interval={sim_stats['sim_packet_interval_ms']} ms)."
+            )
+            try:
+                self._send_command_locked(MessageType.DATA, "StartBrew")
+            except RuntimeError as exc:
+                self._append_log(f"Client StartBrew acknowledgment could not be echoed: {exc}")
+            return
+
+        if normalized.startswith(DataSimulationEvent.STOP_BREW.value):
+            data_payload_manager.stop_brew()
+            self._append_log("Client event StopBrew accepted.")
+            try:
+                self._send_command_locked(MessageType.DATA, "StopBrew")
+            except RuntimeError as exc:
+                self._append_log(f"Client StopBrew acknowledgment could not be echoed: {exc}")
             return
 
         if normalized.startswith(DataSimulationEvent.ON.value):
@@ -1462,6 +1510,18 @@ class LinkRuntime:
         transport_snapshot: SerialLinkSnapshot = serial_link_manager.get_snapshot()
         self._update_usb_throughput_locked(transport_snapshot)
         dp_stats = data_payload_manager.get_stats()
+        brew_active = bool(dp_stats.get("brew_active", False))
+        if self._last_brew_active and not brew_active:
+            if (
+                transport_snapshot.port_open
+                and self._current_state in (LinkState.KEEPALIVE_SERVER_SEND, LinkState.KEEPALIVE_CLIENT_RETURN)
+            ):
+                try:
+                    self._send_command_locked(MessageType.DATA, "BrewComplete")
+                    self._append_log("Brew duration reached. Sent BrewComplete event to client.")
+                except RuntimeError as exc:
+                    self._append_log(f"BrewComplete event could not be forwarded to client: {exc}")
+        self._last_brew_active = brew_active
         esp32c3_connected = bool(transport_snapshot.port_open and self._bridge_ready)
         if not transport_snapshot.port_open:
             esp32c3_link_state = "disconnected"
@@ -1494,6 +1554,11 @@ class LinkRuntime:
             "BottomLayer Sequence Errors": str(self._bottom_layer_sequence_error_count),
             "Text Received From Client": self._last_received_client_text,
             "Data Simulation": "On" if dp_stats["sim_enabled"] else "Off",
+            "StartBrew Event": "On" if brew_active else "Off",
+            "Brew Profile": str(dp_stats.get("brew_profile_name", "")),
+            "Brew Time [Sec]": f"{float(dp_stats.get('brew_time_sec', 0.0)):.1f}",
+            "Brew Elapsed [Sec]": f"{float(dp_stats.get('brew_elapsed_sec', 0.0)):.1f}",
+            "Brew Remaining [Sec]": f"{float(dp_stats.get('brew_remaining_sec', 0.0)):.1f}",
             "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
             "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
             "Packet Interval [mSec]": str(dp_stats["sim_packet_interval_ms"]),
@@ -1548,6 +1613,12 @@ class LinkRuntime:
             "DL Packets Sent": str(dp_stats["dl_tx_count"]),
             "DL Sequence": str(dp_stats["dl_seq"]),
             "Simulation Enabled": "Yes" if dp_stats["sim_enabled"] else "No",
+            "StartBrew Event": "Yes" if brew_active else "No",
+            "Brew Profile": str(dp_stats.get("brew_profile_name", "")),
+            "Brew Time [Sec]": f"{float(dp_stats.get('brew_time_sec', 0.0)):.1f}",
+            "Brew Elapsed [Sec]": f"{float(dp_stats.get('brew_elapsed_sec', 0.0)):.1f}",
+            "Brew Remaining [Sec]": f"{float(dp_stats.get('brew_remaining_sec', 0.0)):.1f}",
+            "Samples/Channel": str(dp_stats.get("brew_samples_per_channel", 0)),
             "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
             "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
             "Packet Interval [mSec]": str(dp_stats["sim_packet_interval_ms"]),
