@@ -181,36 +181,59 @@ class SerialLinkManager:
             return self._snapshot_locked()
 
     def open_port(self) -> SerialLinkSnapshot:
+        if serial is None:
+            raise RuntimeError("pyserial is not installed in the simulator environment.")
+
         with self._lock:
-            if serial is None:
-                raise RuntimeError("pyserial is not installed in the simulator environment.")
             if self._serial is not None and getattr(self._serial, "is_open", False):
                 self._set_event(f"Serial port {self._port_name} already open.")
                 return self._snapshot_locked()
-            try:
-                if "://" in self._port_name:
-                    self._serial = serial.serial_for_url(
-                        self._port_name,
-                        self._baud_rate,
-                        timeout=self._read_timeout_sec,
-                        write_timeout=self._write_timeout_sec,
-                    )
-                else:
-                    self._serial = serial.Serial(
-                        self._port_name,
-                        self._baud_rate,
-                        timeout=self._read_timeout_sec,
-                        write_timeout=self._write_timeout_sec,
-                    )
-            except Exception as exc:  # pragma: no cover
+            port_name = self._port_name
+            baud_rate = self._baud_rate
+            read_timeout_sec = self._read_timeout_sec
+            write_timeout_sec = self._write_timeout_sec
+
+        opened_serial: Any | None = None
+        try:
+            if "://" in port_name:
+                opened_serial = serial.serial_for_url(
+                    port_name,
+                    baud_rate,
+                    timeout=read_timeout_sec,
+                    write_timeout=write_timeout_sec,
+                )
+            else:
+                opened_serial = serial.Serial(
+                    port_name,
+                    baud_rate,
+                    timeout=read_timeout_sec,
+                    write_timeout=write_timeout_sec,
+                )
+        except Exception as exc:  # pragma: no cover
+            with self._lock:
                 self._serial = None
-                self._set_event(f"Failed to open serial port {self._port_name}.", str(exc))
-                raise RuntimeError(str(exc)) from exc
+                self._set_event(f"Failed to open serial port {port_name}.", str(exc))
+            raise RuntimeError(str(exc)) from exc
+
+        reader_thread = Thread(target=self._reader_loop, name="serial-link-rx", daemon=True)
+        with self._lock:
+            if self._serial is not None and getattr(self._serial, "is_open", False):
+                try:
+                    if opened_serial is not None and getattr(opened_serial, "is_open", False):
+                        opened_serial.close()
+                except Exception:
+                    pass
+                self._set_event(f"Serial port {self._port_name} already open.")
+                return self._snapshot_locked()
+
+            self._serial = opened_serial
             self._reader_running = True
-            self._reader_thread = Thread(target=self._reader_loop, name="serial-link-rx", daemon=True)
-            self._reader_thread.start()
-            self._set_event(f"Opened serial port {self._port_name} @ {self._baud_rate}.")
-            return self._snapshot_locked()
+            self._reader_thread = reader_thread
+            self._set_event(f"Opened serial port {port_name} @ {baud_rate}.")
+            snapshot = self._snapshot_locked()
+
+        reader_thread.start()
+        return snapshot
 
     def close_port(self) -> SerialLinkSnapshot:
         with self._lock:
@@ -260,22 +283,36 @@ class SerialLinkManager:
                 current = self._serial
                 if current is None or not getattr(current, "is_open", False):
                     raise RuntimeError(f"Serial port {self._port_name} is not open.")
-                try:
-                    current.write(data)
-                except Exception as exc:
-                    should_retry = attempt < self._tx_max_attempts and self._is_retryable_write_error(exc)
+                port_name = self._port_name
+                tx_max_attempts = self._tx_max_attempts
+            try:
+                current.write(data)
+            except Exception as exc:
+                with self._lock:
+                    still_active = current is self._serial and bool(
+                        self._serial is not None and getattr(self._serial, "is_open", False)
+                    )
+                    should_retry = (
+                        still_active
+                        and attempt < tx_max_attempts
+                        and self._is_retryable_write_error(exc)
+                    )
                     if should_retry:
                         self._set_event(
                             (
-                                f"TX transient error on {self._port_name}; "
-                                f"retrying ({attempt}/{self._tx_max_attempts - 1})."
+                                f"TX transient error on {port_name}; "
+                                f"retrying ({attempt}/{tx_max_attempts - 1})."
                             ),
                             str(exc),
                         )
                     else:
-                        stale_serial = self._detach_serial_locked(f"TX failed on {self._port_name}.", str(exc))
+                        if still_active:
+                            stale_serial = self._detach_serial_locked(f"TX failed on {port_name}.", str(exc))
+                        else:
+                            self._set_event(f"TX failed on {port_name}.", str(exc))
                         snapshot = self._snapshot_locked()
-                else:
+            else:
+                with self._lock:
                     self._tx_frames += 1
                     self._tx_bytes += len(data)
                     self._last_tx_at = self._timestamp()
@@ -285,7 +322,7 @@ class SerialLinkManager:
                     )
                     if attempt > 1:
                         self._log(
-                            f"TX recovered after {attempt} attempts on {self._port_name} "
+                            f"TX recovered after {attempt} attempts on {port_name} "
                             f"for seq={frame.sequence}."
                         )
                     return self._snapshot_locked()
@@ -297,8 +334,8 @@ class SerialLinkManager:
                 except Exception:
                     pass
                 if snapshot is not None:
-                    raise RuntimeError(snapshot.last_error or f"Serial port {self._port_name} write failed.")
-                raise RuntimeError(f"Serial port {self._port_name} write failed.")
+                    raise RuntimeError(snapshot.last_error or f"Serial port {port_name} write failed.")
+                raise RuntimeError(f"Serial port {port_name} write failed.")
 
             if should_retry:
                 sleep(self._tx_retry_backoff_sec)
@@ -306,7 +343,7 @@ class SerialLinkManager:
 
             break
 
-        raise RuntimeError(f"Serial port {self._port_name} write failed.")
+        raise RuntimeError(f"Serial port {port_name} write failed.")
 
     def _is_retryable_write_error(self, exc: Exception) -> bool:
         if serial is not None:

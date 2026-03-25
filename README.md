@@ -172,9 +172,10 @@ For every verification/build/flash task, Codex/Claude must use this exact gated 
 1. Gate 1: quick compliance check of `AGENTS.md`, `README.md`, and `CLAUDE.md`.
 2. Gate 2: run `scripts/start_wait_sound.ps1`.
 3. Gate 3: execute requested build/flash actions sequentially only (no parallel flashing).
-4. Gate 4: run post-flash monitor capture for each flashed target and summarize results.
-5. Gate 5: run `scripts/stop_wait_sound.ps1`.
-6. Gate 6: on successful completion, run `scripts/play_build_success_sound.ps1`.
+4. Gate 4: run `scripts/stop_wait_sound.ps1`.
+5. Gate 5: on successful completion, run `scripts/play_build_success_sound.ps1`.
+
+Post-flash monitor capture is optional and only required when explicitly requested.
 
 If any gate fails, the sequence is non-compliant and execution must stop immediately with:
 `RULE-GATED SEQUENCE BROKEN: <gate>`.

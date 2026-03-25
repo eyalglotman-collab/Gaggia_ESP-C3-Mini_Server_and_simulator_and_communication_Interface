@@ -1,7 +1,7 @@
 """Binary data payload channel for the Eyal Espresso simulator.
 
 Server → Client (downlink):
-    Sequential FIFO.  A background thread generates one packet every 100 ms
+    Sequential FIFO.  A background thread generates one packet every 20 ms
     and calls ``send_callback`` to deliver it over the active serial/TCP path.
     The sequence counter starts at zero on every ``start()`` call so the
     client can detect gaps.
@@ -48,7 +48,7 @@ _UL_FMT: str = f"<BII{DATA_SIZE_FLOATS}f{DATA_SIZE_INT}i{DATA_SIZE_STRING}s"
 DOWNLINK_PACKET_SIZE: int = struct.calcsize(_DL_FMT)
 UPLINK_PACKET_SIZE: int = struct.calcsize(_UL_FMT)
 
-DOWNLINK_INTERVAL_S: float = 0.1
+DOWNLINK_INTERVAL_S: float = 0.02
 DEFAULT_SINE_AMPLITUDE: float = 1.0
 DEFAULT_SINE_FREQUENCY_HZ: float = 1.0
 
@@ -144,10 +144,10 @@ class DataPayloadManager:
     # ------------------------------------------------------------------
 
     def start(self, send_callback: Callable[[bytes], None]) -> None:
-        """@brief Start the 100 ms downlink send thread.
+        """@brief Start the 20 ms downlink send thread.
 
         @details ``send_callback(payload_bytes)`` is called from the
-        background thread every 100 ms when the session is active.  The
+        background thread every 20 ms when the session is active.  The
         caller (``link_state_machine``) should wrap the callback with the
         appropriate lock and state guard.
 
@@ -203,7 +203,7 @@ class DataPayloadManager:
     # ------------------------------------------------------------------
 
     def _run(self) -> None:
-        """@brief Background 100 ms send loop."""
+        """@brief Background 20 ms send loop."""
         try:
             while not self._stop_event.wait(timeout=DOWNLINK_INTERVAL_S):
                 self._generate_and_send()
@@ -230,7 +230,7 @@ class DataPayloadManager:
                 phase_rad + (phase_step * float(DATA_SIZE_FLOATS))
             ) % (2.0 * math.pi)
 
-        # Fill all 100 float fields with a time-domain sine sampled over one packet.
+        # Fill all float fields with a time-domain sine sampled over one packet.
         floats = [
             float(amplitude * math.sin(phase_rad + (phase_step * sample_index)))
             for sample_index in range(DATA_SIZE_FLOATS)

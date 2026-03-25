@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
-from time import monotonic
+from time import monotonic, sleep
 from traceback import format_exception_only
 
 from server.transport.frame_codec import Frame, MessageType
@@ -21,6 +21,18 @@ RUNNING_INTEGER_TIMEOUT_MS = 400
 BOTTOM_LAYER_RETRY_LIMIT = 3
 TOP_LAYER_FAILURE_LIMIT = 3
 CONNECT_SUCCESS_PAYLOADS = {"client_connected", "connect_success", "tcp_connected"}
+SERIAL_OPEN_RETRY_LIMIT = 4
+SERIAL_OPEN_RETRY_BASE_BACKOFF_S = 0.2
+SERIAL_OPEN_TRANSIENT_ERROR_TOKENS = (
+    "semaphore timeout",
+    "cannot configure port",
+    "access is denied",
+    "device not functioning",
+    "i/o error",
+    "resource busy",
+    "permission denied",
+    "clearcommerror failed",
+)
 
 
 class LinkState(StrEnum):
@@ -539,6 +551,50 @@ class LinkRuntime:
         return None
 
     @staticmethod
+    def _is_transient_serial_open_error(error_text: str) -> bool:
+        """@brief Classify known transient Windows serial-open failures."""
+
+        normalized = (error_text or "").strip().lower()
+        if not normalized:
+            return False
+        return any(token in normalized for token in SERIAL_OPEN_TRANSIENT_ERROR_TOKENS)
+
+    def _open_transport_with_retry(self, target_port: str) -> tuple[int, str]:
+        """@brief Open transport with bounded retry for transient COM faults.
+
+        @details Windows can temporarily reject COM re-open after USB resets
+        with errors such as semaphore timeout. The runtime retries only known
+        transient failures to avoid immediately latching an operator-visible
+        blocking error state.
+
+        @return Tuple of ``(attempts_used, last_error_text)`` where
+                ``attempts_used == 0`` means all attempts failed.
+        """
+
+        last_error = ""
+        for attempt in range(1, SERIAL_OPEN_RETRY_LIMIT + 1):
+            try:
+                serial_link_manager.open_port()
+                return attempt, ""
+            except RuntimeError as exc:
+                last_error = str(exc).strip() or "generic unknown failure"
+                transient = self._is_transient_serial_open_error(last_error)
+                with self._lock:
+                    if transient and attempt < SERIAL_OPEN_RETRY_LIMIT:
+                        self._append_log(
+                            f"Open {target_port} attempt {attempt}/{SERIAL_OPEN_RETRY_LIMIT} failed "
+                            f"({last_error}); retrying."
+                        )
+                    else:
+                        self._append_log(
+                            f"Open {target_port} attempt {attempt}/{SERIAL_OPEN_RETRY_LIMIT} failed ({last_error})."
+                        )
+                if not transient or attempt >= SERIAL_OPEN_RETRY_LIMIT:
+                    break
+                sleep(SERIAL_OPEN_RETRY_BASE_BACKOFF_S * float(attempt))
+        return 0, last_error
+
+    @staticmethod
     def _try_parse_u32_payload_value(payload_text: str, key_text: str) -> int | None:
         """@brief Parse one unsigned integer value from a semicolon payload.
 
@@ -1050,17 +1106,24 @@ class LinkRuntime:
                 self._append_log(f"Serial transport already open on {target_port}; open request ignored.")
                 return self._snapshot_locked()
 
-        try:
-            serial_link_manager.open_port()
-        except RuntimeError:
+        open_attempts, open_error = self._open_transport_with_retry(target_port)
+        if open_attempts == 0:
             with self._lock:
                 self._bridge_ready = False
-                self._set_runtime_fault_locked("COM port not found")
+                self._set_runtime_fault_locked(
+                    f"COM open failed on {target_port}: {open_error or 'COM port not found'}"
+                )
                 return self._snapshot_locked()
 
         with self._lock:
             self._bridge_ready = True
-            self._append_log("Serial transport opened. Forcing clean bridge reset before accepting transport traffic.")
+            if open_attempts > 1:
+                self._append_log(
+                    f"Serial transport opened on {target_port} after {open_attempts} attempts."
+                )
+            self._append_log(
+                "Serial transport opened. Forcing clean bridge reset before accepting transport traffic."
+            )
 
         serial_link_manager.clear_buffers()
         data_payload_manager.start(self.send_downlink_data_packet)
@@ -1315,16 +1378,29 @@ class LinkRuntime:
         @param payload Packed bytes from ``data_payload.encode_downlink()``.
         """
         try:
+            frame: Frame
             with self._lock:
                 if self._current_state not in (
                     LinkState.KEEPALIVE_SERVER_SEND,
                     LinkState.KEEPALIVE_CLIENT_RETURN,
                 ):
                     return
-                try:
-                    self._send_binary_locked(MessageType.DATA, payload)
-                except RuntimeError:
-                    pass  # serial port not available; drop silently
+                # Keep runtime lock hold time minimal: prepare the frame while
+                # protected, then perform the potentially blocking serial write
+                # outside the runtime lock.
+                frame = Frame(
+                    message_type=MessageType.DATA,
+                    host_live_integer=self._server_live_integer,
+                    device_live_integer=self._client_live_integer,
+                    sequence=self._next_sequence(),
+                    payload=payload,
+                )
+            try:
+                serial_link_manager.send_frame(frame)
+            except RuntimeError:
+                return  # serial port not available; drop silently
+            with self._lock:
+                self._data_frames_tx_count += 1
         except Exception as exc:
             print(f"\n[link-runtime] UNHANDLED CRASH in send_downlink_data_packet: {exc}", flush=True)
             traceback.print_exc()

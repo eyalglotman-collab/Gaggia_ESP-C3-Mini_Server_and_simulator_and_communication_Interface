@@ -36,12 +36,12 @@
 
 #include "CommunicationFunctions.h"
 
-#define BRIDGE_RX_BUFFER_SIZE           1024
-#define BRIDGE_TX_BUFFER_SIZE           1024
-#define BRIDGE_FRAME_MAX_PAYLOAD        600
+#define BRIDGE_FRAME_MAX_PAYLOAD        2300
 #define BRIDGE_TEXT_PAYLOAD_MAX         256
 #define BRIDGE_FRAME_OVERHEAD           17
 #define BRIDGE_FRAME_MAX_SIZE           (BRIDGE_FRAME_MAX_PAYLOAD + BRIDGE_FRAME_OVERHEAD)
+#define BRIDGE_RX_BUFFER_SIZE           (BRIDGE_FRAME_MAX_SIZE * 2)
+#define BRIDGE_TX_BUFFER_SIZE           (BRIDGE_FRAME_MAX_SIZE * 2)
 #define BRIDGE_POLL_DELAY_MS            20
 #define BRIDGE_DEVICE_LIVE_START        1U
 #define BRIDGE_WIFI_SSID                "EyalSimulatorAP"
@@ -49,7 +49,7 @@
 #define BRIDGE_WIFI_CHANNEL             1
 #define BRIDGE_WIFI_MAX_CONNECTIONS     4
 #define BRIDGE_TCP_PORT                 3333
-#define BRIDGE_TCP_RX_BUFFER_SIZE       1280
+#define BRIDGE_TCP_RX_BUFFER_SIZE       (BRIDGE_FRAME_MAX_SIZE * 3)
 #define BRIDGE_KEEPALIVE_PERIOD_MS      300
 #define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 450
 #define BRIDGE_RUNNING_INTEGER_RETRY_LIMIT 3U
@@ -163,6 +163,7 @@ static void bridge_send_frame_binary(bridge_transport_t transport,
                                      const bridge_frame_t *request_frame,
                                      const uint8_t *payload_data,
                                      size_t payload_length);
+static bool bridge_is_keepalive_session_active(void);
 static void bridge_notify_realtime_data_halted(const char *reason_text);
 static void bridge_send_realtime_data_packet(void);
 
@@ -225,6 +226,11 @@ static void bridge_enter_state(bridge_state_t next_state)
         bridge_notify_realtime_data_halted("not_in_keepalive_state");
         s_realtime_data_stream_active = false;
     }
+    if (state_changed && previous_keepalive && !next_keepalive) {
+        /* Flush staged TCP bytes from the previous session to avoid replaying
+         * stale DATA frames after reconnect/state recovery. */
+        s_tcp_rx_length = 0U;
+    }
 
     s_bridge_state = next_state;
     bridge_update_transport_last_delay_for_state(next_state);
@@ -274,6 +280,20 @@ static uint16_t bridge_crc16_ccitt(const uint8_t *data, size_t length)
     }
 
     return crc;
+}
+
+/**
+ * @brief Return whether DATA forwarding is allowed for the active link state.
+ *
+ * @details DATA is valid only during keepalive phases with a non-zero session
+ * id. Dropping out-of-session DATA prevents stale buffered packets from a
+ * prior TCP link from leaking into the new handshake.
+ */
+static bool bridge_is_keepalive_session_active(void)
+{
+    return (s_active_session_id != 0U) &&
+           (s_bridge_state == BRIDGE_STATE_KEEPALIVE_SERVER_SEND ||
+            s_bridge_state == BRIDGE_STATE_KEEPALIVE_CLIENT_RETURN);
 }
 
 /**
@@ -1471,7 +1491,10 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
                    && frame->payload_length > 0U
                    && frame->payload[0] != BRIDGE_DATA_MAGIC_DOWNLINK) {
             /* Text DATA event from simulator UI/runtime: forward to TCP client. */
-            if (s_tcp_client_fd >= 0) {
+            if (!bridge_is_keepalive_session_active()) {
+                bridge_record_error("data_ignored_not_in_keepalive_session");
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ignored_not_in_keepalive_session");
+            } else if (s_tcp_client_fd >= 0) {
                 bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,
                                          frame->payload, frame->payload_length);
                 bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_forwarded_tcp");
@@ -1482,20 +1505,33 @@ static void bridge_handle_frame(bridge_transport_t transport, const bridge_frame
                    && frame->payload_length > 0U
                    && frame->payload[0] == BRIDGE_DATA_MAGIC_DOWNLINK) {
             /* Binary downlink packet (server → client): forward transparently to TCP. */
-            bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,
-                                     frame->payload, frame->payload_length);
+            if (!bridge_is_keepalive_session_active() || s_tcp_client_fd < 0) {
+                bridge_record_error("data_ignored_not_in_keepalive_session");
+            } else {
+                bridge_send_frame_binary(BRIDGE_TRANSPORT_TCP, BRIDGE_MESSAGE_DATA, frame,
+                                         frame->payload, frame->payload_length);
+            }
         } else if (transport == BRIDGE_TRANSPORT_TCP
                    && frame->payload_length > 0U
                    && frame->payload[0] == BRIDGE_DATA_MAGIC_UPLINK) {
             /* Binary uplink packet (client → server): forward transparently to USB. */
-            bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
-                                     frame->payload, frame->payload_length);
+            if (!bridge_is_keepalive_session_active()) {
+                bridge_record_error("data_ignored_not_in_keepalive_session");
+            } else {
+                bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
+                                         frame->payload, frame->payload_length);
+            }
         } else if (transport == BRIDGE_TRANSPORT_TCP
                    && frame->payload_length > 0U) {
             /* Text DATA event from client (e.g. DataSimulationOn/OFF): forward to USB host runtime. */
-            bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
-                                     frame->payload, frame->payload_length);
-            bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_forwarded_usb");
+            if (!bridge_is_keepalive_session_active()) {
+                bridge_record_error("data_ignored_not_in_keepalive_session");
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ignored_not_in_keepalive_session");
+            } else {
+                bridge_send_frame_binary(BRIDGE_TRANSPORT_USB, BRIDGE_MESSAGE_DATA, frame,
+                                         frame->payload, frame->payload_length);
+                bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_forwarded_usb");
+            }
         } else {
             bridge_send_frame(transport, BRIDGE_MESSAGE_ACK, frame, "data_ack");
         }
@@ -1590,7 +1626,7 @@ static void bridge_accept_tcp_client(void)
  */
 static void bridge_poll_tcp_client(void)
 {
-    uint8_t temp_buffer[128] = {0};
+    uint8_t temp_buffer[BRIDGE_FRAME_MAX_SIZE] = {0};
     fd_set read_fds;
     struct timeval poll_timeout = {
         .tv_sec = 0,
@@ -1607,20 +1643,35 @@ static void bridge_poll_tcp_client(void)
         return;
     }
 
-    int received = recv(s_tcp_client_fd, temp_buffer, sizeof(temp_buffer), 0);
-    if (received > 0) {
-        size_t copy_length = (size_t)received;
-        if ((s_tcp_rx_length + copy_length) > sizeof(s_tcp_rx_buffer)) {
+    while (true) {
+        int received = recv(s_tcp_client_fd, temp_buffer, sizeof(temp_buffer), 0);
+        if (received > 0) {
+            size_t copy_length = (size_t)received;
+            if ((s_tcp_rx_length + copy_length) > sizeof(s_tcp_rx_buffer)) {
+                bridge_record_error("tcp_rx_buffer_overflow");
+                ESP_LOGW(TAG,
+                         "Closing TCP client: RX buffer overflow (%u + %u > %u)",
+                         (unsigned)s_tcp_rx_length,
+                         (unsigned)copy_length,
+                         (unsigned)sizeof(s_tcp_rx_buffer));
+                bridge_close_tcp_client();
+                return;
+            }
+            memcpy(&s_tcp_rx_buffer[s_tcp_rx_length], temp_buffer, copy_length);
+            s_tcp_rx_length += copy_length;
+
+            /* Non-blocking socket: a short read means kernel RX queue is drained. */
+            if (copy_length < sizeof(temp_buffer)) {
+                break;
+            }
+            continue;
+        }
+
+        if (received == 0) {
             bridge_close_tcp_client();
             return;
         }
-        memcpy(&s_tcp_rx_buffer[s_tcp_rx_length], temp_buffer, copy_length);
-        s_tcp_rx_length += copy_length;
-    } else {
-        if (received == 0) {
-            bridge_close_tcp_client();
-        }
-        return;
+        break;
     }
 
     while (s_tcp_rx_length >= BRIDGE_FRAME_OVERHEAD) {

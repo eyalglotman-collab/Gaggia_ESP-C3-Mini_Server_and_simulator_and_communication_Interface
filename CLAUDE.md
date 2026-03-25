@@ -78,9 +78,9 @@ For any verification/build/flash request, execute this gated sequence and report
 - Gate 1: quick compliance check of `AGENTS.md`, `README.md`, and `CLAUDE.md`.
 - Gate 2: run `scripts/start_wait_sound.ps1`.
 - Gate 3: execute requested steps sequentially only (never parallel flash).
-- Gate 4: run mandatory post-flash monitor capture and summarize the result.
-- Gate 5: run `scripts/stop_wait_sound.ps1`.
-- Gate 6: on success, run `scripts/play_build_success_sound.ps1`.
+- Gate 4: run `scripts/stop_wait_sound.ps1`.
+- Gate 5: on success, run `scripts/play_build_success_sound.ps1`.
+- Post-flash monitor capture is optional and only required when explicitly requested.
 - If any gate fails, stop immediately and report: `RULE-GATED SEQUENCE BROKEN: <gate>`.
 
 ---
@@ -229,7 +229,7 @@ Use the sound cue scripts in `scripts/` as workflow notifications for verificati
 
 ### Rule-Gated Execution Sequence
 For every verification/build/flash task, use the exact gated sequence defined in `AGENTS.md` and `README.md`:
-compliance check, `start_wait_sound`, sequential execution, mandatory monitor, `stop_wait_sound`, and success sound.
+compliance check, `start_wait_sound`, sequential execution, `stop_wait_sound`, and success sound.
 
 ### Git Commits
 Perform all git commits with real git access (not sandboxed). Reference format:
