@@ -799,6 +799,7 @@ class LinkRuntime:
                         self._wifi_connected = True
                         self._tcp_connected = True
                         self._bridge_ready = True
+                        self._initialize_completed = True
                         self._connect_completed = True
                         self._clear_connection_fault_locked()
                         self._bottom_layer_retry_count = 0
@@ -833,6 +834,7 @@ class LinkRuntime:
                         self._wifi_connected = True
                         self._tcp_connected = True
                         self._bridge_ready = True
+                        self._initialize_completed = True
                         self._connect_completed = True
                         self._clear_connection_fault_locked()
                         self._bottom_layer_retry_count = 0
@@ -1292,12 +1294,16 @@ class LinkRuntime:
             if self._current_state is LinkState.ERROR:
                 self._append_log("Send data ignored because Reset Communication is required to clear the latched fault.")
                 return self._snapshot_locked()
-            if not self._initialize_completed or not self._connect_completed:
-                self._set_runtime_fault_locked("send data invoke rejected: server has not completed initialize and connect")
-                return self._snapshot_locked()
             if self._current_state not in (LinkState.KEEPALIVE_SERVER_SEND, LinkState.KEEPALIVE_CLIENT_RETURN):
-                self._set_runtime_fault_locked("send data invoke rejected: keepalive-ready connection is not available")
+                self._append_log(
+                    "Send data ignored because keepalive-ready connection is not available yet."
+                )
                 return self._snapshot_locked()
+            if not self._initialize_completed or not self._connect_completed:
+                # Keepalive traffic is authoritative proof that init/connect
+                # completed even if transitional bookkeeping lagged.
+                self._initialize_completed = True
+                self._connect_completed = True
             if not self._try_send_command_locked(
                 MessageType.DATA,
                 payload_text,
@@ -1313,6 +1319,7 @@ class LinkRuntime:
         enabled: bool | None = None,
         amplitude: float | None = None,
         frequency_hz: float | None = None,
+        packet_interval_ms: int | None = None,
     ) -> LinkSnapshot:
         """@brief Update simulator sine-wave generator controls from the UI.
 
@@ -1325,6 +1332,7 @@ class LinkRuntime:
         @param enabled      Optional stream enable flag.
         @param amplitude    Optional sine amplitude value.
         @param frequency_hz Optional sine frequency in Hz.
+        @param packet_interval_ms Optional packet interval in milliseconds.
         """
 
         # Keep this control path side-effect free for transport state:
@@ -1333,6 +1341,7 @@ class LinkRuntime:
         data_payload_manager.configure_sine(
             amplitude=amplitude,
             frequency_hz=frequency_hz,
+            packet_interval_ms=packet_interval_ms,
         )
         if enabled is not None:
             data_payload_manager.set_simulation_enabled(enabled)
@@ -1357,23 +1366,26 @@ class LinkRuntime:
                 self._append_log(
                     "Screen 6 updated simulation parameters "
                     f"(amp={sim_stats['sim_amplitude']:.3f}, "
-                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz)."
+                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz, "
+                    f"interval={sim_stats['sim_packet_interval_ms']} ms)."
                 )
             else:
                 self._append_log(
                     "Screen 6 set simulation "
                     f"{'ON' if sim_stats['sim_enabled'] else 'OFF'} "
                     f"(amp={sim_stats['sim_amplitude']:.3f}, "
-                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz)."
+                    f"freq={sim_stats['sim_frequency_hz']:.3f} Hz, "
+                    f"interval={sim_stats['sim_packet_interval_ms']} ms)."
                 )
             return self._snapshot_locked()
 
     def send_downlink_data_packet(self, payload: bytes) -> None:
         """@brief Send one binary downlink data packet if the session is active.
 
-        @details Called from the data_payload background thread every 100 ms.
-        The call is a no-op when the runtime is outside the keepalive states
-        so no error is raised and the packet is silently dropped.
+        @details Called from the data_payload background thread at the
+        configured packet interval. The call is a no-op when the runtime is
+        outside the keepalive states so no error is raised and the packet is
+        silently dropped.
 
         @param payload Packed bytes from ``data_payload.encode_downlink()``.
         """
@@ -1484,6 +1496,8 @@ class LinkRuntime:
             "Data Simulation": "On" if dp_stats["sim_enabled"] else "Off",
             "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
             "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
+            "Packet Interval [mSec]": str(dp_stats["sim_packet_interval_ms"]),
+            "Data Throughput [kByte/Sec]": f"{dp_stats['sim_data_throughput_kbytes_per_sec']:.3f}",
             "Wi-Fi Timeout (ms)": str(self._config.wifi_connect_timeout_ms),
             "TCP Timeout (ms)": str(self._config.tcp_connect_timeout_ms),
             "Keepalive Period (ms)": str(self._config.keepalive_period_ms),
@@ -1536,6 +1550,8 @@ class LinkRuntime:
             "Simulation Enabled": "Yes" if dp_stats["sim_enabled"] else "No",
             "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
             "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
+            "Packet Interval [mSec]": str(dp_stats["sim_packet_interval_ms"]),
+            "Data Throughput [kByte/Sec]": f"{dp_stats['sim_data_throughput_kbytes_per_sec']:.3f}",
             "UL Packets Received": str(dp_stats["ul_rx_count"]),
             "UL Packets Dropped": str(dp_stats["ul_drop_count"]),
             "UL FIFO Depth": str(dp_stats["ul_fifo_depth"]),
