@@ -11,6 +11,11 @@ from threading import Lock
 from time import monotonic, sleep
 from traceback import format_exception_only
 
+from server.communication.data_structures_lcd_controller import (
+    LCDControllerProfileSummary,
+    build_profile_summaries_from_presets,
+)
+from server.communication.protocol_lcd_controller import LCDControllerProtocolBridge
 from server.transport.frame_codec import Frame, MessageType
 from server.transport.serial_link import SerialLinkSnapshot, serial_link_manager
 from server.sim.data_payload import DATA_MAGIC_UPLINK, data_payload_manager
@@ -18,6 +23,7 @@ from server.sim.data_payload import DATA_MAGIC_UPLINK, data_payload_manager
 WATCHDOG_MS = 100
 WATCHDOG_GRACE_MS = 400
 RUNNING_INTEGER_TIMEOUT_MS = 400
+SHOT_DONE_SUCCESS_DELAY_SEC = 3.0
 BOTTOM_LAYER_RETRY_LIMIT = 3
 TOP_LAYER_FAILURE_LIMIT = 3
 CONNECT_SUCCESS_PAYLOADS = {"client_connected", "connect_success", "tcp_connected"}
@@ -170,6 +176,8 @@ class LinkRuntime:
         self._connect_completed = False
         self._last_received_client_text = "No client text received yet."
         self._last_brew_active = False
+        self._shot_done_pending = False
+        self._shot_done_due_monotonic = 0.0
         # --- Enhanced telemetry counters ---
         self._session_started_at: datetime | None = None
         self._keepalive_req_count: int = 0
@@ -186,6 +194,11 @@ class LinkRuntime:
         self._usb_last_sample_monotonic: float | None = None
         self._usb_last_rx_bytes: int = 0
         self._usb_last_tx_bytes: int = 0
+        self._lcd_protocol_bridge = LCDControllerProtocolBridge()
+        self._lcd_protocol_bridge.initialize_hooks(
+            send_payload_callback=self._send_lcd_protocol_payload_locked,
+            profile_provider_callback=self._get_lcd_protocol_profiles,
+        )
         self._append_log("Transport runtime ready. Default TopLayer state is reset.")
 
     def _timestamp(self) -> str:
@@ -284,6 +297,8 @@ class LinkRuntime:
         self._last_running_integer_rx_at = None
         self._last_received_client_text = "No client text received yet."
         self._last_brew_active = False
+        self._shot_done_pending = False
+        self._shot_done_due_monotonic = 0.0
 
     def _clear_connection_fault_locked(self) -> None:
         """@brief Clear the connection-fault latch after a valid keepalive exchange.
@@ -698,6 +713,27 @@ class LinkRuntime:
                 return None
         return None
 
+    def _send_lcd_protocol_payload_locked(self, payload_text: str) -> None:
+        """@brief Send one LCD protocol DATA payload while runtime lock is held.
+
+        @details The protocol helper calls this hook in response to client
+        bootstrap commands. Failures remain non-fatal and are recorded in logs.
+        """
+
+        try:
+            self._send_command_locked(MessageType.DATA, payload_text)
+        except RuntimeError as exc:
+            self._append_log(f"LCD protocol payload could not be forwarded: {exc}")
+
+    def _get_lcd_protocol_profiles(self) -> list[LCDControllerProfileSummary]:
+        """@brief Build typed profile summaries for protocol catalog response."""
+
+        sim_stats = data_payload_manager.get_stats()
+        profile_presets = sim_stats.get("profiles", [])
+        if not isinstance(profile_presets, list):
+            return []
+        return build_profile_summaries_from_presets(profile_presets)
+
     def _handle_client_data_command_locked(self, payload_text: str) -> None:
         """@brief Apply client DATA text commands to simulator data generation.
 
@@ -707,6 +743,10 @@ class LinkRuntime:
 
         normalized = payload_text.strip().lower()
         if not normalized:
+            return
+
+        if self._lcd_protocol_bridge.handle_client_text_command(payload_text):
+            self._append_log("Client LCD protocol bootstrap command handled.")
             return
 
         if normalized.startswith(DataSimulationEvent.PROFILE_SELECTION.value):
@@ -1427,6 +1467,66 @@ class LinkRuntime:
                 )
             return self._snapshot_locked()
 
+    def configure_lcd_home_data(
+        self,
+        *,
+        profile_id: int | None = None,
+        temperature_c: float | None = None,
+        water_level_pct: float | None = None,
+        weight_g: float | None = None,
+        shot_target_g: float | None = None,
+        warmup_on: bool | None = None,
+        steam_on: bool | None = None,
+    ) -> LinkSnapshot:
+        """@brief Update Screen 7 Home-page values forwarded to the client LCD."""
+
+        started_home_stream = False
+        data_payload_manager.configure_sine(packet_interval_ms=1000)
+        data_payload_manager.configure_lcd_home_data(
+            profile_id=profile_id,
+            temperature_c=temperature_c,
+            water_level_pct=water_level_pct,
+            weight_g=weight_g,
+            shot_target_g=shot_target_g,
+            warmup_on=warmup_on,
+            steam_on=steam_on,
+        )
+        sim_stats = data_payload_manager.get_stats()
+        if not bool(sim_stats.get("brew_active", False)) and not bool(sim_stats.get("sim_enabled", False)):
+            data_payload_manager.set_simulation_enabled(True)
+            started_home_stream = True
+            sim_stats = data_payload_manager.get_stats()
+
+        with self._lock:
+            transport_snapshot = serial_link_manager.get_snapshot()
+            if transport_snapshot.port_open and bool(sim_stats.get("sim_enabled", False)):
+                try:
+                    self._send_command_locked(MessageType.DATA, "DataSimulationOn")
+                    if started_home_stream:
+                        self._append_log("Screen 7 enabled 1 Hz simulation stream for Home data forwarding.")
+                except RuntimeError as exc:
+                    self._append_log(f"Screen 7 could not forward DataSimulationOn to client: {exc}")
+
+            if profile_id is not None:
+                if transport_snapshot.port_open:
+                    profile_cmd = f"ProfileSelection;profile={int(sim_stats['brew_profile_id'])};offline=0"
+                    try:
+                        self._send_command_locked(MessageType.DATA, profile_cmd)
+                    except RuntimeError as exc:
+                        self._append_log(f"Screen 7 could not forward profile selection to client: {exc}")
+
+            self._append_log(
+                "Screen 7 updated Home values "
+                f"(profile={sim_stats['brew_profile_id']}, "
+                f"temp={float(sim_stats.get('home_temperature_c', 0.0)):.1f} C, "
+                f"water={float(sim_stats.get('home_water_level_pct', 0.0)):.1f}%, "
+                f"weight={float(sim_stats.get('home_weight_g', 0.0)):.1f} g, "
+                f"target={float(sim_stats.get('home_shot_target_g', 0.0)):.1f} g, "
+                f"warmup={'ON' if bool(sim_stats.get('home_warmup_on', False)) else 'OFF'}, "
+                f"steam={'ON' if bool(sim_stats.get('home_steam_on', False)) else 'OFF'}."
+            )
+            return self._snapshot_locked()
+
     def send_downlink_data_packet(self, payload: bytes) -> None:
         """@brief Send one binary downlink data packet if the session is active.
 
@@ -1511,16 +1611,31 @@ class LinkRuntime:
         self._update_usb_throughput_locked(transport_snapshot)
         dp_stats = data_payload_manager.get_stats()
         brew_active = bool(dp_stats.get("brew_active", False))
+        now_monotonic = monotonic()
         if self._last_brew_active and not brew_active:
-            if (
-                transport_snapshot.port_open
-                and self._current_state in (LinkState.KEEPALIVE_SERVER_SEND, LinkState.KEEPALIVE_CLIENT_RETURN)
-            ):
-                try:
-                    self._send_command_locked(MessageType.DATA, "BrewComplete")
-                    self._append_log("Brew duration reached. Sent BrewComplete event to client.")
-                except RuntimeError as exc:
-                    self._append_log(f"BrewComplete event could not be forwarded to client: {exc}")
+            self._shot_done_pending = True
+            self._shot_done_due_monotonic = now_monotonic + SHOT_DONE_SUCCESS_DELAY_SEC
+            self._append_log(
+                f"Brew duration reached. Scheduling shot_done_success in {SHOT_DONE_SUCCESS_DELAY_SEC:.1f}s."
+            )
+        if brew_active:
+            self._shot_done_pending = False
+            self._shot_done_due_monotonic = 0.0
+        if (
+            self._shot_done_pending
+            and not brew_active
+            and now_monotonic >= self._shot_done_due_monotonic
+            and transport_snapshot.port_open
+        ):
+            try:
+                self._send_command_locked(MessageType.DATA, "shot_done_success")
+                self._append_log(
+                    f"Delayed shot_done_success sent to client after {SHOT_DONE_SUCCESS_DELAY_SEC:.1f}s."
+                )
+                self._shot_done_pending = False
+                self._shot_done_due_monotonic = 0.0
+            except RuntimeError as exc:
+                self._append_log(f"shot_done_success event could not be forwarded to client: {exc}")
         self._last_brew_active = brew_active
         esp32c3_connected = bool(transport_snapshot.port_open and self._bridge_ready)
         if not transport_snapshot.port_open:
@@ -1555,10 +1670,23 @@ class LinkRuntime:
             "Text Received From Client": self._last_received_client_text,
             "Data Simulation": "On" if dp_stats["sim_enabled"] else "Off",
             "StartBrew Event": "On" if brew_active else "Off",
+            "LCD Active Profile ID": str(int(dp_stats.get("brew_profile_id", 1))),
             "Brew Profile": str(dp_stats.get("brew_profile_name", "")),
             "Brew Time [Sec]": f"{float(dp_stats.get('brew_time_sec', 0.0)):.1f}",
             "Brew Elapsed [Sec]": f"{float(dp_stats.get('brew_elapsed_sec', 0.0)):.1f}",
             "Brew Remaining [Sec]": f"{float(dp_stats.get('brew_remaining_sec', 0.0)):.1f}",
+            "LCD Home Pressure [Bar]": f"{float(dp_stats.get('home_pressure_bar', 0.0)):.2f}",
+            "LCD Home Temperature [C]": f"{float(dp_stats.get('home_temperature_c', 0.0)):.1f}",
+            "LCD Home Water Level [%]": f"{float(dp_stats.get('home_water_level_pct', 0.0)):.1f}",
+            "LCD Home Weight [g]": f"{float(dp_stats.get('home_weight_g', 0.0)):.1f}",
+            "LCD Home Shot Target [g]": f"{float(dp_stats.get('home_shot_target_g', 0.0)):.1f}",
+            "LCD Home Warmup": "On" if bool(dp_stats.get("home_warmup_on", False)) else "Off",
+            "LCD Home Steam": "On" if bool(dp_stats.get("home_steam_on", False)) else "Off",
+            "LCD Profile Count": str(dp_stats.get("profile_count", 0)),
+            "LCD Profiles": " | ".join(
+                str(profile.get("name", "Profile"))
+                for profile in dp_stats.get("profiles", [])
+            ) or "None",
             "Simulation Amplitude": f"{dp_stats['sim_amplitude']:.3f}",
             "Simulation Frequency [Hz]": f"{dp_stats['sim_frequency_hz']:.3f}",
             "Packet Interval [mSec]": str(dp_stats["sim_packet_interval_ms"]),
@@ -1627,6 +1755,7 @@ class LinkRuntime:
             "UL Packets Dropped": str(dp_stats["ul_drop_count"]),
             "UL FIFO Depth": str(dp_stats["ul_fifo_depth"]),
             "Last UL Seq": str(dp_stats["last_ul_seq"]),
+            "Last UL Preview": str(dp_stats.get("home_last_uplink_preview", "")),
         }
         return LinkSnapshot(
             current_state=self._current_state.value,

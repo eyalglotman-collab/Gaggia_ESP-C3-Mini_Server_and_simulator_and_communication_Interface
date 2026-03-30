@@ -103,6 +103,17 @@ Key routes currently implemented in `server/api/routes.py`:
 - `VERSION`: simulator app version
 - `firmware/esp32c3_bridge/VERSION`: bridge firmware version
 
+
+## Design Document Preservation Rule
+
+When editing design documents, preserve existing chapters by default.
+
+- Keep all chapters and sections unless the design in that chapter is no longer relevant.
+- If a chapter is removed or substantially replaced, explicitly document why it became irrelevant.
+- Prefer additive updates (new chapters/subsections) over destructive rewrites.
+- Keep the generated source script and generated `.docx` in sync so regeneration preserves the same chapter set.
+
+
 ## Run
 
 You must install dependencies first:

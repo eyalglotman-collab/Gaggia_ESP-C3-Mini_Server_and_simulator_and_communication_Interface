@@ -36,7 +36,17 @@ class DataSimulationConfigRequest(BaseModel):
     enabled: bool | None = None
     amplitude: float | None = Field(default=None, ge=0.0, le=1000.0)
     frequency_hz: float | None = Field(default=None, gt=0.0, le=1000.0)
-    packet_interval_ms: int | None = Field(default=None, ge=10, le=200)
+    packet_interval_ms: int | None = Field(default=None, ge=10, le=5000)
+
+
+class LCDHomeDataRequest(BaseModel):
+    profile_id: int | None = Field(default=None, ge=1, le=32)
+    temperature_c: float | None = Field(default=None, ge=0.0, le=160.0)
+    water_level_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    weight_g: float | None = Field(default=None, ge=0.0, le=200.0)
+    shot_target_g: float | None = Field(default=None, ge=0.0, le=200.0)
+    warmup_on: bool | None = None
+    steam_on: bool | None = None
 
 
 def _run_snapshot_action(action_name: str, action) -> dict[str, object]:
@@ -164,6 +174,24 @@ def update_data_simulation_config(request: DataSimulationConfigRequest) -> dict[
             amplitude=request.amplitude,
             frequency_hz=request.frequency_hz,
             packet_interval_ms=request.packet_interval_ms,
+        ),
+    )
+
+
+@router.post("/lcd/home")
+def update_lcd_home_data(request: LCDHomeDataRequest) -> dict[str, object]:
+    """@brief Update Screen 7 Home-page fields consumed by client Brew screen."""
+
+    return _run_snapshot_action(
+        "update_lcd_home_data",
+        lambda: link_runtime.configure_lcd_home_data(
+            profile_id=request.profile_id,
+            temperature_c=request.temperature_c,
+            water_level_pct=request.water_level_pct,
+            weight_g=request.weight_g,
+            shot_target_g=request.shot_target_g,
+            warmup_on=request.warmup_on,
+            steam_on=request.steam_on,
         ),
     )
 

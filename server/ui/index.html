@@ -281,6 +281,84 @@
     .status-chip.warn::before { background:var(--warning); }
     .status-chip.danger::before { background:var(--danger); }
 
+    .sim-progress-wrap {
+      display:grid;
+      gap:6px;
+      margin-bottom:8px;
+    }
+
+    .sim-progress-header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:.78rem;
+      color:#c8d7e3;
+    }
+
+    .sim-progress-track {
+      width:100%;
+      height:14px;
+      border-radius:999px;
+      border:1px solid rgba(151, 180, 201, .26);
+      background:rgba(8, 17, 24, .74);
+      overflow:hidden;
+    }
+
+    .sim-progress-fill {
+      height:100%;
+      width:0%;
+      border-radius:inherit;
+      background:linear-gradient(90deg, var(--accent-2), var(--accent));
+      transition:width .16s linear;
+    }
+
+    .sim-progress-text {
+      margin:0;
+      font-size:.78rem;
+      color:#c8d7e3;
+    }
+
+    .sim-stream-summary {
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      color:#c8d7e3;
+      font-size:.74rem;
+      letter-spacing:.03em;
+      text-transform:uppercase;
+    }
+
+    .sim-stream-legend {
+      display:flex;
+      gap:12px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .sim-stream-dot {
+      display:inline-block;
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      margin-right:5px;
+      vertical-align:middle;
+    }
+
+    .sim-stream-dot.pressure { background:#60a5fa; }
+    .sim-stream-dot.temperature { background:#f59e0b; }
+    .sim-stream-dot.weight { background:#34d399; }
+
+    .sim-stream-canvas {
+      width:100%;
+      height:190px;
+      display:block;
+      border-radius:12px;
+      border:1px solid rgba(151, 180, 201, .24);
+      background:linear-gradient(180deg, rgba(9, 18, 28, .82), rgba(6, 13, 20, .92));
+    }
+
     .workspace {
       flex:1;
       min-height:0;
@@ -1024,6 +1102,7 @@
             <button id="navLowLevelLog" type="button" class="secondary">WiFi Controller low-level LOG</button>
             <button id="navDelayPlot" type="button" class="secondary">SERVER/CLIENT DELAY</button>
             <button id="navDataSimulation" type="button" class="secondary">SIMULATE DATA</button>
+            <button id="navLcdHome" type="button" class="secondary">LCD HOME PAGE</button>
           </div>
         </div>
         <div class="meta-strip">
@@ -1359,7 +1438,7 @@
                 <div class="config-grid">
                   <label><span class="label">Amplitude</span><input id="simAmplitude" type="text" value="1.0"></label>
                   <label><span class="label">Frequency (Hz)</span><input id="simFrequencyHz" type="text" value="1.0"></label>
-                  <label><span class="label">Packet Interval [mSec]</span><input id="simPacketIntervalMs" type="text" value="20"></label>
+                  <label><span class="label">Packet Interval [mSec]</span><input id="simPacketIntervalMs" type="text" value="1000"></label>
                   <label><span class="label">Data Throughput [kByte/Sec]</span><input id="simDataThroughputKByteSec" type="text" value="20.000" readonly></label>
                 </div>
                 <div class="section-copy">Tip: keep this screen open while using the client "Simulate Data" graph to verify real-time waveform behavior end-to-end.</div>
@@ -1373,7 +1452,93 @@
                     <p class="section-copy">These values mirror active simulation or StartBrew runtime telemetry consumed by the client Plot screen.</p>
                   </div>
                 </div>
+                <div class="sim-progress-wrap">
+                  <div class="sim-progress-header">
+                    <span class="label">Transmit Time Progress</span>
+                    <span id="simTimeProgressPctLabel">0.0%</span>
+                  </div>
+                  <div class="sim-progress-track">
+                    <div id="simTimeProgressFill" class="sim-progress-fill"></div>
+                  </div>
+                  <p id="simTimeProgressText" class="sim-progress-text">Idle</p>
+                </div>
+                <div class="sim-stream-summary">
+                  <div class="sim-stream-legend">
+                    <span><span class="sim-stream-dot pressure"></span>Pressure</span>
+                    <span><span class="sim-stream-dot temperature"></span>Temperature</span>
+                    <span><span class="sim-stream-dot weight"></span>Weight</span>
+                  </div>
+                  <span id="simStreamLatestLabel">P 0.00 bar | T 0.0 C | W 0.0 g</span>
+                </div>
+                <canvas id="simStreamPlotCanvas" class="sim-stream-canvas"></canvas>
                 <div id="simulationDataGrid" class="data-grid"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="windowLcdHome" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 7</div>
+              <h2 class="window-title">LCD HOME PAGE (BREW)</h2>
+            </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Client Compatibility Surface</div>
+            </div>
+          </div>
+          <div class="window-content">
+            <div class="simulation-layout">
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Server -> Client Data</div>
+                    <h3 class="section-title">Set Home-Screen Fields</h3>
+                    <p class="section-copy">Each line maps one Brew/Home UI value on the client. Set actions update the simulator stream consumed by the LCD.</p>
+                  </div>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Profile ID</span><input id="lcdProfileIdInput" type="text" value="1"></label>
+                  <button id="lcdProfileIdSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Profile Name</span><input id="lcdProfileNameInput" type="text" value="Classic 9 Bar" readonly></label>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Temperature [C]</span><input id="lcdTemperatureInput" type="text" value="93.0"></label>
+                  <button id="lcdTemperatureSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Water Level [%]</span><input id="lcdWaterLevelInput" type="text" value="92.0"></label>
+                  <button id="lcdWaterLevelSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Weight [g]</span><input id="lcdWeightInput" type="text" value="0.0"></label>
+                  <button id="lcdWeightSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Shot Target [g]</span><input id="lcdShotTargetInput" type="text" value="36.0"></label>
+                  <button id="lcdShotTargetSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Warmup ON (0/1)</span><input id="lcdWarmupInput" type="text" value="1"></label>
+                  <button id="lcdWarmupSetButton" type="button">Set</button>
+                </div>
+                <div class="row">
+                  <label style="flex:1 1 220px"><span class="label">Steam ON (0/1)</span><input id="lcdSteamInput" type="text" value="0"></label>
+                  <button id="lcdSteamSetButton" type="button">Set</button>
+                </div>
+              </section>
+
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Client -> Server Data</div>
+                    <h3 class="section-title">Received Data From Client</h3>
+                    <p class="section-copy">These rows are read-only values received from the client side during runtime.</p>
+                  </div>
+                </div>
+                <div id="lcdClientDataTable" class="telemetry-table"></div>
               </section>
             </div>
           </div>
@@ -1416,6 +1581,7 @@
       navLowLevelLog: document.getElementById('navLowLevelLog'),
       navDelayPlot: document.getElementById('navDelayPlot'),
       navDataSimulation: document.getElementById('navDataSimulation'),
+      navLcdHome: document.getElementById('navLcdHome'),
       zeroMaxDelayButton: document.getElementById('zeroMaxDelayButton'),
       totalErrorsButton: document.getElementById('totalErrorsButton'),
       dashboardHeader: document.querySelector('.dashboard-header'),
@@ -1425,6 +1591,7 @@
       windowLowLevelLog: document.getElementById('windowLowLevelLog'),
       windowDelayPlot: document.getElementById('windowDelayPlot'),
       windowDataSimulation: document.getElementById('windowDataSimulation'),
+      windowLcdHome: document.getElementById('windowLcdHome'),
       workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
       serverConnectionInteger: document.getElementById('serverConnectionInteger'),
@@ -1446,7 +1613,28 @@
       simDataThroughputKByteSec: document.getElementById('simDataThroughputKByteSec'),
       simStatusChip: document.getElementById('simStatusChip'),
       startBrewChip: document.getElementById('startBrewChip'),
+      simTimeProgressFill: document.getElementById('simTimeProgressFill'),
+      simTimeProgressPctLabel: document.getElementById('simTimeProgressPctLabel'),
+      simTimeProgressText: document.getElementById('simTimeProgressText'),
+      simStreamPlotCanvas: document.getElementById('simStreamPlotCanvas'),
+      simStreamLatestLabel: document.getElementById('simStreamLatestLabel'),
       simulationDataGrid: document.getElementById('simulationDataGrid'),
+      lcdProfileIdInput: document.getElementById('lcdProfileIdInput'),
+      lcdProfileNameInput: document.getElementById('lcdProfileNameInput'),
+      lcdTemperatureInput: document.getElementById('lcdTemperatureInput'),
+      lcdWaterLevelInput: document.getElementById('lcdWaterLevelInput'),
+      lcdWeightInput: document.getElementById('lcdWeightInput'),
+      lcdShotTargetInput: document.getElementById('lcdShotTargetInput'),
+      lcdWarmupInput: document.getElementById('lcdWarmupInput'),
+      lcdSteamInput: document.getElementById('lcdSteamInput'),
+      lcdProfileIdSetButton: document.getElementById('lcdProfileIdSetButton'),
+      lcdTemperatureSetButton: document.getElementById('lcdTemperatureSetButton'),
+      lcdWaterLevelSetButton: document.getElementById('lcdWaterLevelSetButton'),
+      lcdWeightSetButton: document.getElementById('lcdWeightSetButton'),
+      lcdShotTargetSetButton: document.getElementById('lcdShotTargetSetButton'),
+      lcdWarmupSetButton: document.getElementById('lcdWarmupSetButton'),
+      lcdSteamSetButton: document.getElementById('lcdSteamSetButton'),
+      lcdClientDataTable: document.getElementById('lcdClientDataTable'),
       flash: document.getElementById('flash'),
       splashOverlay: document.getElementById('splashOverlay'),
       splashAppName: document.getElementById('splashAppName'),
@@ -1486,6 +1674,8 @@
     let delayPlotSamples = [];
     let delayPlotSuppressed = false;
     let delayPlotSuppressedMessage = 'Waiting for delay samples...';
+    const simStreamPlotWindowMs = 30_000;
+    let simStreamSamples = [];
     let activeWindowName = 'operational';
     let delayPlotFastRefreshInFlight = false;
     let refreshInFlight = false;
@@ -1501,6 +1691,7 @@
       error: 'Error',
     };
     let configSyncTimer = null;
+    const INPUT_EDIT_GRACE_MS = 1800;
     const asyncButtons = [
       'openButton',
       'closeButton',
@@ -1511,6 +1702,13 @@
       'zeroMaxDelayButton',
       'totalErrorsButton',
       'simDataToggleButton',
+      'lcdProfileIdSetButton',
+      'lcdTemperatureSetButton',
+      'lcdWaterLevelSetButton',
+      'lcdWeightSetButton',
+      'lcdShotTargetSetButton',
+      'lcdWarmupSetButton',
+      'lcdSteamSetButton',
     ];
     const commandStateMap = {
       resetButton: 'reset',
@@ -1518,7 +1716,7 @@
     const backendRequestTimeoutMs = 4000;
     const SIM_FLOAT_BYTES_PER_PACKET = 100 * 4;
     const SIM_PACKET_INTERVAL_MIN_MS = 10;
-    const SIM_PACKET_INTERVAL_MAX_MS = 200;
+    const SIM_PACKET_INTERVAL_MAX_MS = 5000;
     let backendErrorPopupDigest = '';
 
     function hideBackendErrorPopup() {
@@ -1847,6 +2045,7 @@
       elements.navLowLevelLog.classList.toggle('secondary', mode !== 'low-level-log');
       elements.navDelayPlot.classList.toggle('secondary', mode !== 'delay-plot');
       elements.navDataSimulation.classList.toggle('secondary', mode !== 'data-simulation');
+      elements.navLcdHome.classList.toggle('secondary', mode !== 'lcd-home');
     }
 
     function getOffsetTopWithinAncestor(node, ancestor) {
@@ -1886,6 +2085,7 @@
       elements.windowLowLevelLog.classList.toggle('active-window', name === 'low-level-log');
       elements.windowDelayPlot.classList.toggle('active-window', name === 'delay-plot');
       elements.windowDataSimulation.classList.toggle('active-window', name === 'data-simulation');
+      elements.windowLcdHome.classList.toggle('active-window', name === 'lcd-home');
       setNavMode(name);
 
       const target =
@@ -1899,7 +2099,9 @@
                 ? elements.windowLowLevelLog
                 : name === 'delay-plot'
                   ? elements.windowDelayPlot
-                  : elements.windowDataSimulation;
+                  : name === 'data-simulation'
+                    ? elements.windowDataSimulation
+                    : elements.windowLcdHome;
       scrollGroupToTop(target);
     }
 
@@ -2066,6 +2268,141 @@
       drawDelayPlotFromSamples();
     }
 
+    function parseFiniteNumber(rawValue, fallback = 0) {
+      const parsed = Number.parseFloat(String(rawValue ?? ''));
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function sampleSimStream(snapshot) {
+      const importantData = snapshot?.important_data || {};
+      const nowMs = Date.now();
+      simStreamSamples.push({
+        t: nowMs,
+        pressure: Math.max(0, parseFiniteNumber(importantData['LCD Home Pressure [Bar]'], 0)),
+        temperature: Math.max(0, parseFiniteNumber(importantData['LCD Home Temperature [C]'], 0)),
+        weight: Math.max(0, parseFiniteNumber(importantData['LCD Home Weight [g]'], 0)),
+      });
+      const cutoffMs = nowMs - simStreamPlotWindowMs;
+      simStreamSamples = simStreamSamples.filter((sample) => sample.t >= cutoffMs);
+    }
+
+    function drawSimStreamPlotFromSamples() {
+      const canvas = elements.simStreamPlotCanvas;
+      if (!canvas) return;
+
+      const nowMs = Date.now();
+      const cutoffMs = nowMs - simStreamPlotWindowMs;
+      simStreamSamples = simStreamSamples.filter((sample) => sample.t >= cutoffMs);
+
+      const latest = simStreamSamples.length ? simStreamSamples[simStreamSamples.length - 1] : null;
+      if (elements.simStreamLatestLabel) {
+        if (!latest) {
+          elements.simStreamLatestLabel.textContent = 'P 0.00 bar | T 0.0 C | W 0.0 g';
+        } else {
+          elements.simStreamLatestLabel.textContent =
+            `P ${latest.pressure.toFixed(2)} bar | T ${latest.temperature.toFixed(1)} C | W ${latest.weight.toFixed(1)} g`;
+        }
+      }
+
+      const cssWidth = Math.max(canvas.clientWidth || 1, 1);
+      const cssHeight = Math.max(canvas.clientHeight || 1, 1);
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.max(Math.round(cssWidth * dpr), 1);
+      const pixelHeight = Math.max(Math.round(cssHeight * dpr), 1);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      const leftPad = 56;
+      const rightPad = 20;
+      const topPad = 14;
+      const bottomPad = 28;
+      const plotWidth = Math.max(cssWidth - leftPad - rightPad, 1);
+      const plotHeight = Math.max(cssHeight - topPad - bottomPad, 1);
+
+      let yMax = 1;
+      simStreamSamples.forEach((sample) => {
+        yMax = Math.max(yMax, sample.pressure, sample.temperature, sample.weight);
+      });
+      yMax = Math.max(1, Math.ceil(yMax / 10) * 10);
+
+      ctx.strokeStyle = 'rgba(151, 180, 201, 0.2)';
+      ctx.fillStyle = 'rgba(198, 219, 234, 0.86)';
+      ctx.font = '11px "Segoe UI", "Arial", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      for (let tick = 0; tick <= 10; tick += 1) {
+        const y = topPad + (tick / 10) * plotHeight;
+        ctx.beginPath();
+        ctx.moveTo(leftPad, y);
+        ctx.lineTo(leftPad + plotWidth, y);
+        ctx.stroke();
+        const tickValue = yMax * (1 - tick / 10);
+        ctx.fillText(formatTickValue(tickValue), leftPad - 8, y);
+      }
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      for (let tick = 0; tick <= 10; tick += 1) {
+        const x = leftPad + (tick / 10) * plotWidth;
+        ctx.beginPath();
+        ctx.moveTo(x, topPad);
+        ctx.lineTo(x, topPad + plotHeight);
+        ctx.stroke();
+        const secondsAgo = 30 - (tick * 3);
+        const label = secondsAgo <= 0 ? 'now' : `-${secondsAgo}s`;
+        ctx.fillText(label, x, topPad + plotHeight + 5);
+      }
+
+      if (!simStreamSamples.length) {
+        ctx.fillStyle = 'rgba(198, 219, 234, 0.72)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Waiting for client-bound stream samples...', leftPad + plotWidth / 2, topPad + plotHeight / 2);
+        return;
+      }
+
+      const mapPoint = (sample) => {
+        const normalizedX = (sample.t - cutoffMs) / simStreamPlotWindowMs;
+        const x = leftPad + Math.min(Math.max(normalizedX, 0), 1) * plotWidth;
+        return {
+          x,
+          pressureY: topPad + (1 - Math.min(Math.max(sample.pressure / yMax, 0), 1)) * plotHeight,
+          temperatureY: topPad + (1 - Math.min(Math.max(sample.temperature / yMax, 0), 1)) * plotHeight,
+          weightY: topPad + (1 - Math.min(Math.max(sample.weight / yMax, 0), 1)) * plotHeight,
+        };
+      };
+
+      const points = simStreamSamples.map(mapPoint);
+      const drawSeries = (key, color) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const y = key === 'pressure' ? point.pressureY : key === 'temperature' ? point.temperatureY : point.weightY;
+          if (index === 0) ctx.moveTo(point.x, y);
+          else ctx.lineTo(point.x, y);
+        });
+        ctx.stroke();
+      };
+
+      drawSeries('pressure', 'rgba(96, 165, 250, 0.95)');
+      drawSeries('temperature', 'rgba(245, 158, 11, 0.95)');
+      drawSeries('weight', 'rgba(52, 211, 153, 0.95)');
+    }
+
+    function renderSimStreamPlot(snapshot) {
+      sampleSimStream(snapshot);
+      drawSimStreamPlotFromSamples();
+    }
+
     function renderStates(snapshot) {
       elements.states.innerHTML = '';
       snapshot.available_states.forEach((state) => {
@@ -2129,10 +2466,10 @@
     function parseSimulationPacketIntervalMs(rawValue) {
       const packetIntervalMs = Number(rawValue);
       if (!Number.isFinite(packetIntervalMs) || !Number.isInteger(packetIntervalMs)) {
-        throw new Error('Packet interval must be an integer in range [10, 200] mSec.');
+        throw new Error('Packet interval must be an integer in range [10, 5000] mSec.');
       }
       if (packetIntervalMs < SIM_PACKET_INTERVAL_MIN_MS || packetIntervalMs > SIM_PACKET_INTERVAL_MAX_MS) {
-        throw new Error('Packet interval must be an integer in range [10, 200] mSec.');
+        throw new Error('Packet interval must be an integer in range [10, 5000] mSec.');
       }
       return packetIntervalMs;
     }
@@ -2168,13 +2505,80 @@
       }
     }
 
+    function parseIntegerRange(rawValue, label, minValue, maxValue) {
+      const parsed = Number(rawValue);
+      if (!Number.isInteger(parsed) || parsed < minValue || parsed > maxValue) {
+        throw new Error(`${label} must be an integer in range [${minValue}, ${maxValue}].`);
+      }
+      return parsed;
+    }
+
+    function parseFloatRange(rawValue, label, minValue, maxValue) {
+      const parsed = Number(rawValue);
+      if (!Number.isFinite(parsed) || parsed < minValue || parsed > maxValue) {
+        throw new Error(`${label} must be a number in range [${minValue}, ${maxValue}].`);
+      }
+      return parsed;
+    }
+
+    function parseBool01(rawValue, label) {
+      const text = String(rawValue || '').trim().toLowerCase();
+      if (text === '1' || text === 'true' || text === 'on' || text === 'yes') return true;
+      if (text === '0' || text === 'false' || text === 'off' || text === 'no') return false;
+      throw new Error(`${label} must be 0/1 (or true/false).`);
+    }
+
+    function postLcdHomePatch(patch, button = null) {
+      post('/api/lcd/home', patch, button);
+    }
+
+    function markInputEdited(input) {
+      if (!input) return;
+      input.dataset.lastUserEditMs = String(Date.now());
+    }
+
+    function renderLcdHome(snapshot) {
+      const importantData = snapshot?.important_data || {};
+      const telemetryData = snapshot?.telemetry_data || {};
+
+      syncInputValue(elements.lcdProfileIdInput, importantData['LCD Active Profile ID'] || '1');
+      syncInputValue(elements.lcdProfileNameInput, importantData['Brew Profile'] || 'Profile');
+      syncInputValue(elements.lcdTemperatureInput, importantData['LCD Home Temperature [C]'] || '0.0');
+      syncInputValue(elements.lcdWaterLevelInput, importantData['LCD Home Water Level [%]'] || '0.0');
+      syncInputValue(elements.lcdWeightInput, importantData['LCD Home Weight [g]'] || '0.0');
+      syncInputValue(elements.lcdShotTargetInput, importantData['LCD Home Shot Target [g]'] || '0.0');
+
+      const warmupOn = String(importantData['LCD Home Warmup'] || 'Off').trim().toLowerCase() === 'on';
+      const steamOn = String(importantData['LCD Home Steam'] || 'Off').trim().toLowerCase() === 'on';
+      syncInputValue(elements.lcdWarmupInput, warmupOn ? '1' : '0');
+      syncInputValue(elements.lcdSteamInput, steamOn ? '1' : '0');
+
+      const rows = [
+        ['Text Received From Client', String(importantData['Text Received From Client'] || 'No client text received yet.')],
+        ['UL Packets Received', String(telemetryData['UL Packets Received'] || '0')],
+        ['UL FIFO Depth', String(telemetryData['UL FIFO Depth'] || '0')],
+        ['Last UL Seq', String(telemetryData['Last UL Seq'] || '0')],
+        ['Last UL Preview', String(telemetryData['Last UL Preview'] || 'N/A')],
+        ['Active Profile Name', String(importantData['Brew Profile'] || 'N/A')],
+        ['Available Profiles', String(importantData['LCD Profiles'] || 'N/A')],
+      ];
+
+      elements.lcdClientDataTable.innerHTML = '';
+      rows.forEach(([key, value]) => {
+        const row = document.createElement('div');
+        row.className = 'telemetry-row';
+        row.innerHTML = `<div class="telemetry-cell-name">${key}</div><div class="telemetry-cell-value">${value}</div>`;
+        elements.lcdClientDataTable.appendChild(row);
+      });
+    }
+
     function renderSimulationData(snapshot) {
       const importantData = snapshot.important_data || {};
       const telemetryData = snapshot.telemetry_data || {};
       const simulationEnabled = isSimulationEnabled(snapshot);
       const amplitudeText = String(importantData['Simulation Amplitude'] || '1.000');
       const frequencyText = String(importantData['Simulation Frequency [Hz]'] || '1.000');
-      const packetIntervalText = String(importantData['Packet Interval [mSec]'] || '20');
+      const packetIntervalText = String(importantData['Packet Interval [mSec]'] || '1000');
       const throughputKByteSec = calculateSimulationThroughputKByteSec(packetIntervalText);
       const throughputText = Number.isFinite(throughputKByteSec)
         ? throughputKByteSec.toFixed(3)
@@ -2184,6 +2588,11 @@
       const brewElapsedSec = String(importantData['Brew Elapsed [Sec]'] || '0.0');
       const brewTimeSec = String(importantData['Brew Time [Sec]'] || '0.0');
       const brewRemainingSec = String(importantData['Brew Remaining [Sec]'] || '0.0');
+      const brewElapsedSecValue = Number.parseFloat(brewElapsedSec);
+      const brewTimeSecValue = Number.parseFloat(brewTimeSec);
+      const dlSeqValue = Number.parseInt(String(telemetryData['DL Sequence'] || '0'), 10);
+      let txProgressPct = 0;
+      let txProgressText = 'Idle';
 
       syncInputValue(elements.simAmplitude, amplitudeText);
       syncInputValue(elements.simFrequencyHz, frequencyText);
@@ -2193,6 +2602,24 @@
       setChipState(elements.simStatusChip, simulationEnabled ? 'ok' : 'warn', simulationEnabled ? 'Simulation On' : 'Simulation Off');
       setChipState(elements.startBrewChip, startBrewActive ? 'ok' : 'warn', startBrewActive ? 'StartBrew Active' : 'StartBrew Idle');
       elements.simDataToggleButton.textContent = simulationEnabled ? 'Stop Simulation' : 'Start Simulation';
+      if (startBrewActive && Number.isFinite(brewElapsedSecValue) && Number.isFinite(brewTimeSecValue) && brewTimeSecValue > 0) {
+        txProgressPct = Math.max(0, Math.min(100, (brewElapsedSecValue / brewTimeSecValue) * 100));
+        txProgressText = `${brewElapsedSecValue.toFixed(1)}s / ${brewTimeSecValue.toFixed(1)}s`;
+      } else if (simulationEnabled) {
+        const seq = Number.isFinite(dlSeqValue) ? dlSeqValue : 0;
+        txProgressPct = Math.max(5, seq % 100);
+        txProgressText = `Streaming packets: seq ${seq}`;
+      }
+      if (elements.simTimeProgressFill) {
+        elements.simTimeProgressFill.style.width = `${txProgressPct.toFixed(1)}%`;
+      }
+      if (elements.simTimeProgressPctLabel) {
+        elements.simTimeProgressPctLabel.textContent = `${txProgressPct.toFixed(1)}%`;
+      }
+      if (elements.simTimeProgressText) {
+        elements.simTimeProgressText.textContent = txProgressText;
+      }
+      renderSimStreamPlot(snapshot);
 
       const cards = [
         ['Simulation Enabled', simulationEnabled ? 'Yes' : 'No'],
@@ -2240,7 +2667,10 @@
     }
 
     function syncInputValue(input, value) {
+      if (!input) return;
       if (document.activeElement === input) return;
+      const editedAtMs = Number(input.dataset.lastUserEditMs || '0');
+      if (Number.isFinite(editedAtMs) && editedAtMs > 0 && (Date.now() - editedAtMs) < INPUT_EDIT_GRACE_MS) return;
       input.value = String(value ?? '');
     }
 
@@ -2302,6 +2732,7 @@
       renderTotalErrors(snapshot);
       renderDelayPlot(snapshot);
       renderSimulationData(snapshot);
+      renderLcdHome(snapshot);
 
       if (Array.isArray(snapshot.logs)) {
         latestLogs = snapshot.logs;
@@ -2428,6 +2859,7 @@
     elements.navLowLevelLog.addEventListener('click', () => activateWindow('low-level-log'));
     elements.navDelayPlot.addEventListener('click', () => activateWindow('delay-plot'));
     elements.navDataSimulation.addEventListener('click', () => activateWindow('data-simulation'));
+    elements.navLcdHome.addEventListener('click', () => activateWindow('lcd-home'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));
     elements.releaseComButton.addEventListener('click', () => post('/api/transport/release-com', null, elements.releaseComButton));
@@ -2449,6 +2881,98 @@
     elements.simFrequencyHz.addEventListener('blur', postSimulationParameterUpdate);
     elements.simPacketIntervalMs.addEventListener('blur', postSimulationParameterUpdate);
     elements.simPacketIntervalMs.addEventListener('input', renderSimulationThroughputFromInput);
+    [
+      elements.lcdProfileIdInput,
+      elements.lcdTemperatureInput,
+      elements.lcdWaterLevelInput,
+      elements.lcdWeightInput,
+      elements.lcdShotTargetInput,
+      elements.lcdWarmupInput,
+      elements.lcdSteamInput,
+    ].forEach((input) => {
+      if (!input) return;
+      input.addEventListener('input', () => markInputEdited(input));
+      input.addEventListener('keydown', () => markInputEdited(input));
+      input.addEventListener('paste', () => markInputEdited(input));
+      input.addEventListener('drop', () => markInputEdited(input));
+    });
+    elements.lcdProfileIdSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdProfileIdInput);
+        postLcdHomePatch(
+          { profile_id: parseIntegerRange(elements.lcdProfileIdInput.value, 'Profile ID', 1, 32) },
+          elements.lcdProfileIdSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid Profile ID.', true);
+      }
+    });
+    elements.lcdTemperatureSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdTemperatureInput);
+        postLcdHomePatch(
+          { temperature_c: parseFloatRange(elements.lcdTemperatureInput.value, 'Temperature', 0, 160) },
+          elements.lcdTemperatureSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid temperature.', true);
+      }
+    });
+    elements.lcdWaterLevelSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdWaterLevelInput);
+        postLcdHomePatch(
+          { water_level_pct: parseFloatRange(elements.lcdWaterLevelInput.value, 'Water level', 0, 100) },
+          elements.lcdWaterLevelSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid water level.', true);
+      }
+    });
+    elements.lcdWeightSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdWeightInput);
+        postLcdHomePatch(
+          { weight_g: parseFloatRange(elements.lcdWeightInput.value, 'Weight', 0, 200) },
+          elements.lcdWeightSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid weight.', true);
+      }
+    });
+    elements.lcdShotTargetSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdShotTargetInput);
+        postLcdHomePatch(
+          { shot_target_g: parseFloatRange(elements.lcdShotTargetInput.value, 'Shot target', 0, 200) },
+          elements.lcdShotTargetSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid shot target.', true);
+      }
+    });
+    elements.lcdWarmupSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdWarmupInput);
+        postLcdHomePatch(
+          { warmup_on: parseBool01(elements.lcdWarmupInput.value, 'Warmup') },
+          elements.lcdWarmupSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid warmup value.', true);
+      }
+    });
+    elements.lcdSteamSetButton.addEventListener('click', () => {
+      try {
+        markInputEdited(elements.lcdSteamInput);
+        postLcdHomePatch(
+          { steam_on: parseBool01(elements.lcdSteamInput.value, 'Steam') },
+          elements.lcdSteamSetButton
+        );
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : 'Invalid steam value.', true);
+      }
+    });
     elements.loggerToggleButton.addEventListener('click', () => {
       setLoggersPaused(!loggerPaused, true);
     });

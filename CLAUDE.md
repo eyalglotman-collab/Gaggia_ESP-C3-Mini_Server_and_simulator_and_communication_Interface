@@ -144,6 +144,14 @@ The Python process does **not** directly own the Wi-Fi/TCP listener — the brid
 - `VERSION` — simulator app version
 - `firmware/esp32c3_bridge/VERSION` — bridge firmware version
 
+
+### Design Document Preservation Rule
+- Preserve all existing chapters in design documents by default.
+- Remove or heavily rewrite a chapter only when that chapter's design is no longer relevant.
+- When a chapter is removed/replaced, record the reason explicitly in revision history or change notes.
+- Keep generator scripts and generated `.docx` artifacts aligned so chapter structure survives regeneration.
+
+
 ### Run / Launch
 Install dependencies:
 ```bash

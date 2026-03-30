@@ -2,7 +2,7 @@
 
 Server → Client (downlink):
     Sequential FIFO. A background thread generates one packet every configured
-    packet interval (default 20 ms) and calls ``send_callback`` to deliver it
+    packet interval (default 1000 ms) and calls ``send_callback`` to deliver it
     over the active serial/TCP path. The sequence counter starts at zero on
     every ``start()`` call so the client can detect gaps.
 
@@ -21,6 +21,11 @@ import traceback
 from collections import deque
 from threading import Event, Lock, Thread
 from typing import Callable, Optional
+
+from server.communication.data_structures_lcd_controller import (
+    LCDControllerBrewHomeState,
+    brew_home_state_to_legacy_int_slots,
+)
 
 # ---------------------------------------------------------------------------
 # Size constants — must match data_payload.h on the client side.
@@ -50,10 +55,10 @@ UPLINK_PACKET_SIZE: int = struct.calcsize(_UL_FMT)
 
 DEFAULT_SINE_AMPLITUDE: float = 1.0
 DEFAULT_SINE_FREQUENCY_HZ: float = 1.0
-DEFAULT_PACKET_INTERVAL_MS: int = 20
+DEFAULT_PACKET_INTERVAL_MS: int = 1000
 DEFAULT_BREW_PACKET_INTERVAL_MS: int = 100
 MIN_PACKET_INTERVAL_MS: int = 10
-MAX_PACKET_INTERVAL_MS: int = 200
+MAX_PACKET_INTERVAL_MS: int = 5000
 SIM_FLOAT_BYTES_PER_PACKET: int = DATA_SIZE_FLOATS * 4
 BREW_SAMPLES_PER_CHANNEL: int = 10
 DEFAULT_BREW_PROFILE_ID: int = 1
@@ -62,6 +67,90 @@ DEFAULT_BREW_TIME_SEC: float = 30.0
 DEFAULT_BREW_TARGET_PRESSURE_BAR: float = 9.0
 DEFAULT_BREW_TARGET_FLOW_ML_SEC: float = 2.2
 DEFAULT_BREW_TARGET_TEMPERATURE_C: float = 93.0
+DEFAULT_HOME_WATER_LEVEL_PCT: float = 92.0
+DEFAULT_HOME_WEIGHT_G: float = 0.0
+DEFAULT_HOME_SHOT_TARGET_G: float = 36.0
+
+PROFILE_PRESETS: tuple[dict[str, object], ...] = (
+    {
+        "id": 1,
+        "name": "Classic 9 Bar",
+        "target_temperature_c": 93.0,
+        "target_pressure_bar": 9.0,
+        "target_flow_ml_sec": 2.2,
+        "preinfusion_seconds": 4.0,
+        "shot_target_g": 36.0,
+    },
+    {
+        "id": 2,
+        "name": "Turbo Shot",
+        "target_temperature_c": 91.0,
+        "target_pressure_bar": 7.5,
+        "target_flow_ml_sec": 3.0,
+        "preinfusion_seconds": 2.0,
+        "shot_target_g": 30.0,
+    },
+    {
+        "id": 3,
+        "name": "Light Roast",
+        "target_temperature_c": 96.0,
+        "target_pressure_bar": 9.5,
+        "target_flow_ml_sec": 1.8,
+        "preinfusion_seconds": 6.0,
+        "shot_target_g": 40.0,
+    },
+)
+
+BREW_PROFILE_SAMPLE_DT_SEC: float = 0.1
+BREW_PROFILE_SAMPLE_COUNT: int = int(DEFAULT_BREW_TIME_SEC / BREW_PROFILE_SAMPLE_DT_SEC) + 1
+
+
+def _build_profile_sample_library() -> dict[int, dict[str, list[float]]]:
+    """@brief Precompute deterministic brew samples for each profile in static memory."""
+
+    library: dict[int, dict[str, list[float]]] = {}
+    sample_count = max(2, BREW_PROFILE_SAMPLE_COUNT)
+
+    for profile in PROFILE_PRESETS:
+        profile_id = int(profile.get("id", DEFAULT_BREW_PROFILE_ID))
+        target_pressure = float(profile.get("target_pressure_bar", DEFAULT_BREW_TARGET_PRESSURE_BAR))
+        target_flow = float(profile.get("target_flow_ml_sec", DEFAULT_BREW_TARGET_FLOW_ML_SEC))
+        target_temp = float(profile.get("target_temperature_c", DEFAULT_BREW_TARGET_TEMPERATURE_C))
+        shot_target = float(profile.get("shot_target_g", DEFAULT_HOME_SHOT_TARGET_G))
+        temp_start = max(20.0, target_temp - 8.0)
+
+        pressure_samples: list[float] = []
+        flow_samples: list[float] = []
+        temperature_samples: list[float] = []
+        weight_samples: list[float] = []
+
+        for index in range(sample_count):
+            progress = float(index) / float(sample_count - 1)
+            pressure_samples.append(float(max(0.0, target_pressure * progress)))
+            flow_samples.append(float(max(0.0, target_flow * progress)))
+            temperature_samples.append(float(temp_start + ((target_temp - temp_start) * progress)))
+            weight_samples.append(float(max(0.0, shot_target * progress)))
+
+        if pressure_samples:
+            pressure_samples[-1] = float(max(0.0, target_pressure))
+        if flow_samples:
+            flow_samples[-1] = float(max(0.0, target_flow))
+        if temperature_samples:
+            temperature_samples[-1] = float(target_temp)
+        if weight_samples:
+            weight_samples[-1] = max(0.0, shot_target)
+
+        library[profile_id] = {
+            "pressure_bar": pressure_samples,
+            "flow_ml_s": flow_samples,
+            "temperature_c": temperature_samples,
+            "weight_g": weight_samples,
+        }
+
+    return library
+
+
+PROFILE_SAMPLE_LIBRARY: dict[int, dict[str, list[float]]] = _build_profile_sample_library()
 
 
 def _compute_simulation_throughput_kbytes_per_sec(packet_interval_ms: int) -> float:
@@ -150,6 +239,8 @@ class DataPayloadManager:
     def __init__(self) -> None:
         self._lock = Lock()
         self._ul_fifo: deque[dict] = deque(maxlen=FIFO_DEPTH)
+        self._profile_presets: list[dict[str, object]] = [dict(profile) for profile in PROFILE_PRESETS]
+        self._profile_sample_library: dict[int, dict[str, list[float]]] = PROFILE_SAMPLE_LIBRARY
         self._dl_seq: int = 0
         self._ul_rx_count: int = 0
         self._ul_drop_count: int = 0
@@ -169,9 +260,27 @@ class DataPayloadManager:
         self._brew_active: bool = False
         self._brew_started_monotonic: float = 0.0
         self._brew_elapsed_sec: float = 0.0
+        self._home_started_monotonic: float = time.monotonic()
+        self._home_temperature_override_c: float | None = None
+        self._home_water_level_override_pct: float | None = None
+        self._home_weight_override_g: float | None = None
+        self._home_shot_target_override_g: float | None = None
+        self._home_warmup_override: bool | None = None
+        self._home_steam_override: bool | None = None
+        self._home_uptime_override_minutes: float | None = None
+        self._home_temperature_c: float = DEFAULT_BREW_TARGET_TEMPERATURE_C
+        self._home_pressure_bar: float = 0.2
+        self._home_water_level_pct: float = DEFAULT_HOME_WATER_LEVEL_PCT
+        self._home_weight_g: float = DEFAULT_HOME_WEIGHT_G
+        self._home_shot_target_g: float = DEFAULT_HOME_SHOT_TARGET_G
+        self._home_warmup_on: bool = True
+        self._home_steam_on: bool = False
+        self._home_uptime_minutes: float = 0.0
+        self._home_last_uplink_preview: str = "No uplink packets received yet."
         self._last_control_event: str = "Idle"
         self._send_callback: Optional[Callable[[bytes], None]] = None
         self._stop_event = Event()
+        self._wake_event = Event()
         self._thread: Optional[Thread] = None
 
     # ------------------------------------------------------------------
@@ -196,14 +305,19 @@ class DataPayloadManager:
         self._brew_active = False
         self._brew_started_monotonic = 0.0
         self._brew_elapsed_sec = 0.0
+        self._home_started_monotonic = time.monotonic()
+        self._home_pressure_bar = 0.2
+        self._home_uptime_minutes = 0.0
         self._last_control_event = "Idle"
         self._stop_event.clear()
+        self._wake_event.clear()
         self._thread = Thread(target=self._run, daemon=True, name="data_payload_dl")
         self._thread.start()
 
     def stop(self) -> None:
         """@brief Stop the downlink send thread and clear pending state."""
         self._stop_event.set()
+        self._wake_event.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
@@ -215,6 +329,8 @@ class DataPayloadManager:
             self._brew_active = False
             self._brew_started_monotonic = 0.0
             self._brew_elapsed_sec = 0.0
+            self._home_pressure_bar = 0.2
+            self._home_uptime_minutes = 0.0
 
     # ------------------------------------------------------------------
     # Simulation control
@@ -231,6 +347,7 @@ class DataPayloadManager:
                 self._last_control_event = "DataSimulationOn"
             else:
                 self._last_control_event = "DataSimulationOFF"
+        self._wake_event.set()
 
     def configure_sine(
         self,
@@ -258,6 +375,83 @@ class DataPayloadManager:
                     MIN_PACKET_INTERVAL_MS,
                     min(int(packet_interval_ms), MAX_PACKET_INTERVAL_MS),
                 )
+        self._wake_event.set()
+
+    def _resolve_profile_locked(self, profile_id: int | None) -> dict[str, object]:
+        """@brief Resolve a profile id to the closest known preset entry."""
+
+        if not self._profile_presets:
+            return {
+                "id": DEFAULT_BREW_PROFILE_ID,
+                "name": DEFAULT_BREW_PROFILE_NAME,
+                "target_temperature_c": DEFAULT_BREW_TARGET_TEMPERATURE_C,
+                "target_pressure_bar": DEFAULT_BREW_TARGET_PRESSURE_BAR,
+                "target_flow_ml_sec": DEFAULT_BREW_TARGET_FLOW_ML_SEC,
+                "preinfusion_seconds": 0.0,
+                "shot_target_g": DEFAULT_HOME_SHOT_TARGET_G,
+            }
+
+        desired = self._selected_profile_id if profile_id is None else int(profile_id)
+        for profile in self._profile_presets:
+            if int(profile.get("id", 0)) == desired:
+                return profile
+        return self._profile_presets[0]
+
+    def _apply_profile_locked(self, profile: dict[str, object]) -> None:
+        """@brief Copy one profile preset into active brew/home fields."""
+
+        self._selected_profile_id = int(profile.get("id", DEFAULT_BREW_PROFILE_ID))
+        self._selected_profile_name = str(profile.get("name", DEFAULT_BREW_PROFILE_NAME))
+        self._brew_target_pressure_bar = float(profile.get("target_pressure_bar", DEFAULT_BREW_TARGET_PRESSURE_BAR))
+        self._brew_target_flow_ml_sec = float(profile.get("target_flow_ml_sec", DEFAULT_BREW_TARGET_FLOW_ML_SEC))
+        self._brew_target_temperature_c = float(profile.get("target_temperature_c", DEFAULT_BREW_TARGET_TEMPERATURE_C))
+        if self._home_shot_target_override_g is None:
+            self._home_shot_target_g = float(profile.get("shot_target_g", DEFAULT_HOME_SHOT_TARGET_G))
+        if self._home_temperature_override_c is None:
+            self._home_temperature_c = self._brew_target_temperature_c
+
+    def configure_lcd_home_data(
+        self,
+        *,
+        profile_id: int | None = None,
+        temperature_c: float | None = None,
+        water_level_pct: float | None = None,
+        weight_g: float | None = None,
+        shot_target_g: float | None = None,
+        warmup_on: bool | None = None,
+        steam_on: bool | None = None,
+    ) -> None:
+        """@brief Update screen-7 Home overrides pushed from simulator UI."""
+
+        with self._lock:
+            if profile_id is not None:
+                self._apply_profile_locked(self._resolve_profile_locked(profile_id))
+            if temperature_c is not None:
+                value = max(0.0, min(float(temperature_c), 160.0))
+                self._home_temperature_override_c = value
+                self._home_temperature_c = value
+                # Keep target + live temperature aligned with Screen-7 set input.
+                self._brew_target_temperature_c = value
+            if water_level_pct is not None:
+                value = max(0.0, min(float(water_level_pct), 100.0))
+                self._home_water_level_override_pct = value
+                self._home_water_level_pct = value
+            if weight_g is not None:
+                value = max(0.0, min(float(weight_g), 200.0))
+                self._home_weight_override_g = value
+                self._home_weight_g = value
+            if shot_target_g is not None:
+                value = max(0.0, min(float(shot_target_g), 200.0))
+                self._home_shot_target_override_g = value
+                self._home_shot_target_g = value
+            if warmup_on is not None:
+                self._home_warmup_override = bool(warmup_on)
+                self._home_warmup_on = bool(warmup_on)
+            if steam_on is not None:
+                self._home_steam_override = bool(steam_on)
+                self._home_steam_on = bool(steam_on)
+            self._last_control_event = "Screen7HomeDataSet"
+        self._wake_event.set()
 
     def select_profile(self, profile_id: int | None = None, *, offline: bool | None = None) -> None:
         """@brief Select active brew profile metadata for the next StartBrew.
@@ -268,38 +462,31 @@ class DataPayloadManager:
 
         del offline
         with self._lock:
-            _ = profile_id  # reserved for future profile table expansion
-            self._selected_profile_id = DEFAULT_BREW_PROFILE_ID
-            self._selected_profile_name = DEFAULT_BREW_PROFILE_NAME
-            self._brew_target_pressure_bar = DEFAULT_BREW_TARGET_PRESSURE_BAR
-            self._brew_target_flow_ml_sec = DEFAULT_BREW_TARGET_FLOW_ML_SEC
-            self._brew_target_temperature_c = DEFAULT_BREW_TARGET_TEMPERATURE_C
+            profile = self._resolve_profile_locked(profile_id)
+            self._apply_profile_locked(profile)
             self._brew_time_sec = DEFAULT_BREW_TIME_SEC
             self._last_control_event = "ProfileSelection"
+        self._wake_event.set()
 
     def start_brew(self, profile_id: int | None = None, packet_interval_ms: int | None = None) -> None:
         """@brief Start brew-mode downlink packet generation."""
 
         with self._lock:
-            _ = profile_id  # reserved for future profile table expansion
-            self._selected_profile_id = DEFAULT_BREW_PROFILE_ID
-            self._selected_profile_name = DEFAULT_BREW_PROFILE_NAME
-            self._brew_target_pressure_bar = DEFAULT_BREW_TARGET_PRESSURE_BAR
-            self._brew_target_flow_ml_sec = DEFAULT_BREW_TARGET_FLOW_ML_SEC
-            self._brew_target_temperature_c = DEFAULT_BREW_TARGET_TEMPERATURE_C
+            profile = self._resolve_profile_locked(profile_id)
+            self._apply_profile_locked(profile)
             self._brew_time_sec = DEFAULT_BREW_TIME_SEC
-            self._packet_interval_ms = max(
-                MIN_PACKET_INTERVAL_MS,
-                min(
-                    int(DEFAULT_BREW_PACKET_INTERVAL_MS if packet_interval_ms is None else packet_interval_ms),
-                    MAX_PACKET_INTERVAL_MS,
-                ),
-            )
+            del packet_interval_ms
+            self._packet_interval_ms = DEFAULT_BREW_PACKET_INTERVAL_MS
+            # Brew stream must stay dynamic; clear static overrides that can freeze progress.
+            self._home_weight_override_g = None
+            self._home_water_level_override_pct = None
+            self._home_warmup_override = None
             self._brew_active = True
             self._brew_started_monotonic = time.monotonic()
             self._brew_elapsed_sec = 0.0
             self._simulation_enabled = False
             self._last_control_event = "StartBrew"
+        self._wake_event.set()
 
     def stop_brew(self) -> None:
         """@brief Stop brew-mode packet generation."""
@@ -309,6 +496,7 @@ class DataPayloadManager:
             self._brew_started_monotonic = 0.0
             self._brew_elapsed_sec = 0.0
             self._last_control_event = "StopBrew"
+        self._wake_event.set()
 
     # ------------------------------------------------------------------
     # Downlink send thread
@@ -321,7 +509,10 @@ class DataPayloadManager:
                 with self._lock:
                     interval_ms = self._packet_interval_ms
                 interval_s = max(MIN_PACKET_INTERVAL_MS, min(interval_ms, MAX_PACKET_INTERVAL_MS)) / 1000.0
-                if self._stop_event.wait(timeout=interval_s):
+                wake_triggered = self._wake_event.wait(timeout=interval_s)
+                if wake_triggered:
+                    self._wake_event.clear()
+                if self._stop_event.is_set():
                     break
                 self._generate_and_send(interval_s)
         except Exception as exc:
@@ -344,30 +535,15 @@ class DataPayloadManager:
         flow_samples: list[float] = []
         temperature_samples: list[float] = []
         safe_brew_time = max(0.001, brew_time_sec)
+        temp_start = max(20.0, target_temperature_c - 8.0)
 
         for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
             t_sec = elapsed_sec + (sample_dt_sec * float(sample_index))
             progress = max(0.0, min(t_sec / safe_brew_time, 1.0))
 
-            if t_sec < 4.0:
-                pressure_bar = target_pressure_bar * (t_sec / 4.0)
-            elif progress > 0.92:
-                tail = max(0.0, 1.0 - ((progress - 0.92) / 0.08))
-                pressure_bar = (target_pressure_bar * 0.9 * tail) + (0.10 * math.sin(2.0 * math.pi * 1.1 * t_sec))
-            else:
-                pressure_bar = target_pressure_bar + (0.18 * math.sin(2.0 * math.pi * 0.8 * t_sec))
-            pressure_bar = max(0.0, pressure_bar)
-
-            if t_sec < 6.0:
-                flow_ml_sec = target_flow_ml_sec * (t_sec / 6.0)
-            elif progress > 0.92:
-                tail = max(0.0, 1.0 - ((progress - 0.92) / 0.08))
-                flow_ml_sec = (target_flow_ml_sec * 0.85 * tail) + (0.08 * math.sin(2.0 * math.pi * 0.7 * t_sec))
-            else:
-                flow_ml_sec = target_flow_ml_sec + (0.12 * math.sin(2.0 * math.pi * 0.55 * t_sec + 0.6))
-            flow_ml_sec = max(0.0, flow_ml_sec)
-
-            temperature_c = target_temperature_c - (1.6 * math.exp(-t_sec / 7.0)) + (0.06 * math.sin(2.0 * math.pi * 0.2 * t_sec))
+            pressure_bar = max(0.0, target_pressure_bar * progress)
+            flow_ml_sec = max(0.0, target_flow_ml_sec * progress)
+            temperature_c = temp_start + ((target_temperature_c - temp_start) * progress)
 
             pressure_samples.append(float(pressure_bar))
             flow_samples.append(float(flow_ml_sec))
@@ -382,6 +558,7 @@ class DataPayloadManager:
             return
 
         brew_mode = False
+        brew_complete_after_send = False
         seq = 0
         packet_interval_ms = DEFAULT_PACKET_INTERVAL_MS
         amplitude = 0.0
@@ -395,6 +572,14 @@ class DataPayloadManager:
         brew_target_pressure_bar = DEFAULT_BREW_TARGET_PRESSURE_BAR
         brew_target_flow_ml_sec = DEFAULT_BREW_TARGET_FLOW_ML_SEC
         brew_target_temperature_c = DEFAULT_BREW_TARGET_TEMPERATURE_C
+        home_started_monotonic = 0.0
+        home_temperature_override_c: float | None = None
+        home_water_level_override_pct: float | None = None
+        home_weight_override_g: float | None = None
+        home_shot_target_override_g: float | None = None
+        home_warmup_override: bool | None = None
+        home_steam_override: bool | None = None
+        home_uptime_override_minutes: float | None = None
 
         with self._lock:
             if not self._simulation_enabled and not self._brew_active:
@@ -413,11 +598,9 @@ class DataPayloadManager:
                 )
                 brew_time_sec = self._brew_time_sec
                 if brew_elapsed_sec >= brew_time_sec:
-                    self._brew_active = False
                     self._brew_elapsed_sec = brew_time_sec
-                    self._brew_started_monotonic = 0.0
-                    self._last_control_event = "BrewComplete"
-                    return
+                    brew_elapsed_sec = brew_time_sec
+                    brew_complete_after_send = True
                 brew_profile_id = self._selected_profile_id
                 brew_profile_name = self._selected_profile_name
                 brew_target_pressure_bar = self._brew_target_pressure_bar
@@ -433,34 +616,63 @@ class DataPayloadManager:
                     phase_rad + (phase_step * float(DATA_SIZE_FLOATS))
                 ) % (2.0 * math.pi)
 
+            home_started_monotonic = self._home_started_monotonic
+            home_temperature_override_c = self._home_temperature_override_c
+            home_water_level_override_pct = self._home_water_level_override_pct
+            home_weight_override_g = self._home_weight_override_g
+            home_shot_target_override_g = self._home_shot_target_override_g
+            home_warmup_override = self._home_warmup_override
+            home_steam_override = self._home_steam_override
+            home_uptime_override_minutes = self._home_uptime_override_minutes
+
+        pressure_values: list[float] = []
+        flow_values: list[float] = []
+        temperature_values: list[float] = []
+        sample_cursor = 0
+        profile_samples: dict[str, list[float]] | None = None
         if brew_mode:
-            sample_dt_sec = packet_interval_s / float(BREW_SAMPLES_PER_CHANNEL)
-            pressure_values, flow_values, temperature_values = self._build_brew_channels(
-                brew_elapsed_sec,
-                sample_dt_sec,
-                target_pressure_bar=brew_target_pressure_bar,
-                target_flow_ml_sec=brew_target_flow_ml_sec,
-                target_temperature_c=brew_target_temperature_c,
-                brew_time_sec=brew_time_sec,
-            )
+            profile_samples = self._profile_sample_library.get(int(brew_profile_id))
+            if profile_samples:
+                pressure_table = profile_samples.get("pressure_bar", [])
+                flow_table = profile_samples.get("flow_ml_s", [])
+                temperature_table = profile_samples.get("temperature_c", [])
+                sample_count = min(len(pressure_table), len(flow_table), len(temperature_table))
+                if sample_count > 0:
+                    if brew_elapsed_sec >= brew_time_sec:
+                        sample_cursor = sample_count - 1
+                    else:
+                        sample_cursor = min(
+                            int(max(0.0, brew_elapsed_sec / BREW_PROFILE_SAMPLE_DT_SEC)),
+                            sample_count - 1,
+                        )
+                    for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
+                        history_index = sample_cursor - (BREW_SAMPLES_PER_CHANNEL - 1 - sample_index)
+                        idx = max(0, min(history_index, sample_count - 1))
+                        pressure_values.append(float(pressure_table[idx]))
+                        flow_values.append(float(flow_table[idx]))
+                        temperature_values.append(float(temperature_table[idx]))
+            if not pressure_values or not flow_values or not temperature_values:
+                sample_dt_sec = packet_interval_s / float(BREW_SAMPLES_PER_CHANNEL)
+                pressure_values, flow_values, temperature_values = self._build_brew_channels(
+                    brew_elapsed_sec,
+                    sample_dt_sec,
+                    target_pressure_bar=brew_target_pressure_bar,
+                    target_flow_ml_sec=brew_target_flow_ml_sec,
+                    target_temperature_c=brew_target_temperature_c,
+                    brew_time_sec=brew_time_sec,
+                )
+                sample_cursor = max(0, len(pressure_values) - 1)
+
             floats = [0.0] * DATA_SIZE_FLOATS
             for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
                 floats[sample_index] = pressure_values[sample_index]
                 floats[BREW_SAMPLES_PER_CHANNEL + sample_index] = flow_values[sample_index]
                 floats[(2 * BREW_SAMPLES_PER_CHANNEL) + sample_index] = temperature_values[sample_index]
-            ints = [
-                seq & 0x7FFFFFFF,
-                int(brew_profile_id),
-                int(round(brew_elapsed_sec * 1000.0)),
-                int(round(brew_time_sec * 1000.0)),
-                int(round(brew_target_pressure_bar * 1000.0)),
-                int(round(brew_target_flow_ml_sec * 1000.0)),
-                int(round(brew_target_temperature_c * 1000.0)),
-            ] + [0] * (DATA_SIZE_INT - 7)
+
             text = (
                 f"brew=on;profile={brew_profile_id};name={brew_profile_name};"
                 f"elapsed_s={brew_elapsed_sec:.2f};brew_time_s={brew_time_sec:.1f};"
-                f"int_ms={packet_interval_ms};seq={seq}"
+                f"int_ms={packet_interval_ms};seq={seq};sample_cursor={sample_cursor}"
             )
         else:
             # Fill all float fields with a time-domain sine sampled over one packet.
@@ -468,15 +680,113 @@ class DataPayloadManager:
                 float(amplitude * math.sin(phase_rad + (phase_step * sample_index)))
                 for sample_index in range(DATA_SIZE_FLOATS)
             ]
-            ints = [
-                seq & 0x7FFFFFFF,
-                int(round(amplitude * 1000.0)),
-                int(round(frequency_hz * 1000.0)),
-            ] + [0] * (DATA_SIZE_INT - 3)
             text = (
                 f"sim=on;amp={amplitude:.3f};freq={frequency_hz:.3f};"
                 f"int_ms={packet_interval_ms};seq={seq}"
             )
+
+        flow_for_mass = flow_values if flow_values else [brew_target_flow_ml_sec]
+        avg_flow_ml_sec = max(0.0, sum(flow_for_mass) / max(1, len(flow_for_mass)))
+        default_pressure_bar = (
+            pressure_values[-1]
+            if pressure_values
+            else 0.2
+        )
+        default_temperature_c = (
+            temperature_values[-1]
+            if temperature_values
+            else (brew_target_temperature_c - 1.0 + (0.15 * math.sin(phase_rad)))
+        )
+        default_shot_target_g = max(0.0, brew_target_flow_ml_sec * brew_time_sec)
+        default_weight_g = max(0.0, avg_flow_ml_sec * brew_elapsed_sec) if brew_mode else 0.0
+        if brew_mode and profile_samples is not None:
+            weight_samples = profile_samples.get("weight_g", [])
+            if weight_samples:
+                idx = min(sample_cursor, len(weight_samples) - 1)
+                default_weight_g = max(0.0, float(weight_samples[idx]))
+                default_shot_target_g = max(default_shot_target_g, float(weight_samples[-1]))
+        if brew_mode and brew_time_sec > 0.0:
+            # Keep shot-progress percentage aligned to elapsed brew time.
+            time_progress = max(0.0, min(brew_elapsed_sec / brew_time_sec, 1.0))
+            default_weight_g = min(default_weight_g, default_shot_target_g * time_progress)
+            if brew_elapsed_sec >= brew_time_sec:
+                default_weight_g = default_shot_target_g
+        default_water_level_pct = max(0.0, min(100.0, 100.0 - (default_weight_g * 0.45)))
+        default_warmup_on = default_temperature_c < (brew_target_temperature_c - 0.6)
+        default_steam_on = False
+        default_uptime_minutes = max(0.0, (time.monotonic() - home_started_monotonic) / 60.0)
+
+        home_temperature_c = (
+            default_temperature_c
+            if brew_mode
+            else (
+                float(home_temperature_override_c)
+                if home_temperature_override_c is not None
+                else default_temperature_c
+            )
+        )
+        home_water_level_pct = (
+            default_water_level_pct
+            if brew_mode
+            else (
+                float(home_water_level_override_pct)
+                if home_water_level_override_pct is not None
+                else default_water_level_pct
+            )
+        )
+        home_weight_g = (
+            default_weight_g
+            if brew_mode
+            else (
+                float(home_weight_override_g)
+                if home_weight_override_g is not None
+                else default_weight_g
+            )
+        )
+        home_shot_target_g = (
+            float(home_shot_target_override_g)
+            if home_shot_target_override_g is not None
+            else default_shot_target_g
+        )
+        home_warmup_on = (
+            default_warmup_on
+            if brew_mode
+            else (bool(home_warmup_override) if home_warmup_override is not None else default_warmup_on)
+        )
+        home_steam_on = bool(home_steam_override) if home_steam_override is not None else default_steam_on
+        home_uptime_minutes = (
+            float(home_uptime_override_minutes)
+            if home_uptime_override_minutes is not None
+            else default_uptime_minutes
+        )
+
+        if not brew_mode:
+            # Keep Brew/Home live temperature deterministic for client Home UI
+            # when Screen-7 temperature is edited outside StartBrew mode.
+            for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
+                temp_slot = (2 * BREW_SAMPLES_PER_CHANNEL) + sample_index
+                if temp_slot >= DATA_SIZE_FLOATS:
+                    break
+                floats[temp_slot] = float(home_temperature_c)
+
+        brew_home_state = LCDControllerBrewHomeState(
+            profile_id=int(brew_profile_id),
+            brew_elapsed_ms=int(round(brew_elapsed_sec * 1000.0)),
+            brew_duration_ms=int(round(brew_time_sec * 1000.0)),
+            target_temperature_c=float(brew_target_temperature_c),
+            target_pressure_bar=float(brew_target_pressure_bar),
+            target_flow_ml_s=float(brew_target_flow_ml_sec),
+            live_pressure_bar=float(default_pressure_bar),
+            live_temperature_c=float(home_temperature_c),
+            live_water_level_pct=float(home_water_level_pct),
+            live_weight_g=float(home_weight_g),
+            shot_target_preview_g=float(home_shot_target_g),
+            warmup_on=bool(home_warmup_on),
+            steam_on=bool(home_steam_on),
+            uptime_minutes=0.0,
+        )
+        ints = brew_home_state_to_legacy_int_slots(brew_home_state)
+        ints[0] = seq & 0x7FFFFFFF
 
         payload = encode_downlink(seq, floats, ints, text)
         try:
@@ -485,6 +795,18 @@ class DataPayloadManager:
                 self._dl_tx_count += 1
                 if brew_mode:
                     self._brew_elapsed_sec = brew_elapsed_sec
+                    if brew_complete_after_send and self._brew_active:
+                        self._brew_active = False
+                        self._brew_started_monotonic = 0.0
+                        self._last_control_event = "BrewComplete"
+                self._home_pressure_bar = default_pressure_bar
+                self._home_temperature_c = home_temperature_c
+                self._home_water_level_pct = home_water_level_pct
+                self._home_weight_g = home_weight_g
+                self._home_shot_target_g = home_shot_target_g
+                self._home_warmup_on = home_warmup_on
+                self._home_steam_on = home_steam_on
+                self._home_uptime_minutes = home_uptime_minutes
         except Exception:
             pass  # link not ready; packet silently dropped
 
@@ -510,6 +832,12 @@ class DataPayloadManager:
             self._ul_fifo.append(pkt)
             self._ul_rx_count += 1
             self._last_ul_seq = pkt["seq"]
+            payload_text = str(pkt.get("s", "")).strip()
+            if not payload_text:
+                payload_text = "<empty>"
+            self._home_last_uplink_preview = (
+                f"seq={int(pkt.get('seq', 0))}, ts={int(pkt.get('timestamp_ms', 0))}, text={payload_text[:48]}"
+            )
 
     def pop_uplink(self) -> Optional[dict]:
         """@brief Pop the oldest received uplink packet, or None if empty.
@@ -540,6 +868,11 @@ class DataPayloadManager:
             if self._brew_active and self._brew_started_monotonic > 0.0:
                 brew_elapsed_sec = max(0.0, time.monotonic() - self._brew_started_monotonic)
             brew_remaining_sec = max(0.0, self._brew_time_sec - brew_elapsed_sec)
+            uptime_minutes = (
+                float(self._home_uptime_override_minutes)
+                if self._home_uptime_override_minutes is not None
+                else max(0.0, (time.monotonic() - self._home_started_monotonic) / 60.0)
+            )
             return {
                 "dl_tx_count": self._dl_tx_count,
                 "ul_rx_count": self._ul_rx_count,
@@ -560,6 +893,17 @@ class DataPayloadManager:
                 "brew_remaining_sec": brew_remaining_sec,
                 "brew_samples_per_channel": BREW_SAMPLES_PER_CHANNEL,
                 "last_control_event": self._last_control_event,
+                "home_temperature_c": self._home_temperature_c,
+                "home_pressure_bar": self._home_pressure_bar,
+                "home_water_level_pct": self._home_water_level_pct,
+                "home_weight_g": self._home_weight_g,
+                "home_shot_target_g": self._home_shot_target_g,
+                "home_warmup_on": self._home_warmup_on,
+                "home_steam_on": self._home_steam_on,
+                "home_uptime_minutes": uptime_minutes,
+                "home_last_uplink_preview": self._home_last_uplink_preview,
+                "profile_count": len(self._profile_presets),
+                "profiles": [dict(profile) for profile in self._profile_presets],
             }
 
 
