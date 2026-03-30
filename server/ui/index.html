@@ -2319,47 +2319,86 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-      const leftPad = 56;
-      const rightPad = 20;
+      const leftPad = 74;
+      const rightPad = 128;
       const topPad = 14;
       const bottomPad = 28;
       const plotWidth = Math.max(cssWidth - leftPad - rightPad, 1);
       const plotHeight = Math.max(cssHeight - topPad - bottomPad, 1);
 
-      let yMax = 1;
-      simStreamSamples.forEach((sample) => {
-        yMax = Math.max(yMax, sample.pressure, sample.temperature, sample.weight);
-      });
-      yMax = Math.max(1, Math.ceil(yMax / 10) * 10);
+      const tickCount = 6;
+      const pressureAxisMax = Math.max(0.1, simStreamSamples.reduce((maxValue, sample) => Math.max(maxValue, sample.pressure), 0));
+      const temperatureAxisMax = Math.max(1, simStreamSamples.reduce((maxValue, sample) => Math.max(maxValue, sample.temperature), 0));
+      const weightAxisMax = Math.max(1, simStreamSamples.reduce((maxValue, sample) => Math.max(maxValue, sample.weight), 0));
 
-      ctx.strokeStyle = 'rgba(151, 180, 201, 0.2)';
-      ctx.fillStyle = 'rgba(198, 219, 234, 0.86)';
-      ctx.font = '11px "Segoe UI", "Arial", sans-serif';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
+      const leftAxisX = leftPad;
+      const rightTempAxisX = leftPad + plotWidth + 24;
+      const rightWeightAxisX = leftPad + plotWidth + 78;
 
-      for (let tick = 0; tick <= 10; tick += 1) {
-        const y = topPad + (tick / 10) * plotHeight;
+      ctx.strokeStyle = 'rgba(151, 180, 201, 0.18)';
+      for (let tick = 0; tick <= tickCount; tick += 1) {
+        const y = topPad + (tick / tickCount) * plotHeight;
         ctx.beginPath();
         ctx.moveTo(leftPad, y);
         ctx.lineTo(leftPad + plotWidth, y);
         ctx.stroke();
-        const tickValue = yMax * (1 - tick / 10);
-        ctx.fillText(formatTickValue(tickValue), leftPad - 8, y);
       }
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      for (let tick = 0; tick <= 10; tick += 1) {
-        const x = leftPad + (tick / 10) * plotWidth;
+      for (let tick = 0; tick <= tickCount; tick += 1) {
+        const x = leftPad + (tick / tickCount) * plotWidth;
         ctx.beginPath();
         ctx.moveTo(x, topPad);
         ctx.lineTo(x, topPad + plotHeight);
+        ctx.strokeStyle = 'rgba(151, 180, 201, 0.12)';
         ctx.stroke();
-        const secondsAgo = 30 - (tick * 3);
+        const secondsAgo = Math.round(simStreamPlotWindowMs / 1000) - Math.round((tick / tickCount) * (simStreamPlotWindowMs / 1000));
         const label = secondsAgo <= 0 ? 'now' : `-${secondsAgo}s`;
+        ctx.fillStyle = 'rgba(198, 219, 234, 0.86)';
+        ctx.font = '11px "Segoe UI", "Arial", sans-serif';
         ctx.fillText(label, x, topPad + plotHeight + 5);
       }
+
+      const drawAxis = (axisX, axisMax, color, align, labelOffset) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(axisX, topPad);
+        ctx.lineTo(axisX, topPad + plotHeight);
+        ctx.stroke();
+
+        ctx.textAlign = align;
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = color;
+        ctx.font = '11px "Segoe UI", "Arial", sans-serif';
+        for (let tick = 0; tick <= tickCount; tick += 1) {
+          const y = topPad + (tick / tickCount) * plotHeight;
+          const tickValue = axisMax * (1 - tick / tickCount);
+          const tickStart = axisX;
+          const tickEnd = align === 'right' ? axisX - 6 : axisX + 6;
+          ctx.beginPath();
+          ctx.moveTo(tickStart, y);
+          ctx.lineTo(tickEnd, y);
+          ctx.stroke();
+          const textX = axisX + labelOffset;
+          ctx.fillText(formatTickValue(tickValue), textX, y);
+        }
+      };
+
+      drawAxis(leftAxisX, pressureAxisMax, 'rgba(96, 165, 250, 0.98)', 'right', -10);
+      drawAxis(rightTempAxisX, temperatureAxisMax, 'rgba(245, 158, 11, 0.98)', 'left', 10);
+      drawAxis(rightWeightAxisX, weightAxisMax, 'rgba(52, 211, 153, 0.98)', 'left', 10);
+
+      ctx.fillStyle = 'rgba(96, 165, 250, 0.95)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = '11px "Segoe UI", "Arial", sans-serif';
+      ctx.fillText('P [bar]', leftAxisX + 2, topPad - 12);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.95)';
+      ctx.fillText('T [C]', rightTempAxisX - 2, topPad - 12);
+      ctx.fillStyle = 'rgba(52, 211, 153, 0.95)';
+      ctx.fillText('W [g]', rightWeightAxisX - 2, topPad - 12);
 
       if (!simStreamSamples.length) {
         ctx.fillStyle = 'rgba(198, 219, 234, 0.72)';
@@ -2374,9 +2413,9 @@
         const x = leftPad + Math.min(Math.max(normalizedX, 0), 1) * plotWidth;
         return {
           x,
-          pressureY: topPad + (1 - Math.min(Math.max(sample.pressure / yMax, 0), 1)) * plotHeight,
-          temperatureY: topPad + (1 - Math.min(Math.max(sample.temperature / yMax, 0), 1)) * plotHeight,
-          weightY: topPad + (1 - Math.min(Math.max(sample.weight / yMax, 0), 1)) * plotHeight,
+          pressureY: topPad + (1 - Math.min(Math.max(sample.pressure / pressureAxisMax, 0), 1)) * plotHeight,
+          temperatureY: topPad + (1 - Math.min(Math.max(sample.temperature / temperatureAxisMax, 0), 1)) * plotHeight,
+          weightY: topPad + (1 - Math.min(Math.max(sample.weight / weightAxisMax, 0), 1)) * plotHeight,
         };
       };
 
