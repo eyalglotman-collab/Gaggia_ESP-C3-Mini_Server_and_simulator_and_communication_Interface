@@ -48,7 +48,7 @@ typedef enum {
  * @brief Per-profile data mirrored from `eepromValues_t::profile_t`.
  */
 typedef struct {
-    char name[LCD_CONTROLLER_PROFILE_NAME_LENGTH];
+    char name[LCD_CONTROLLER_PROFILE_NAME_LENGTH]; // \Var in use on the BREW screen UI
 
     bool preinfusion_state;
     bool preinfusion_flow_state;
@@ -106,12 +106,12 @@ typedef struct {
     uint16_t mf_profile_slope_shape;
     float mf_profiling_pressure_restriction;
 
-    uint16_t setpoint;
-    bool stop_on_weight_state;
-    float shot_dose;
-    float shot_stop_on_custom_weight;
-    uint16_t shot_preset;
-} lcd_controller_profile_t;
+    uint16_t setpoint; // \Var in use on the BREW screen UI
+    bool stop_on_weight_state; // \Var in use on the BREW screen UI
+    float shot_dose; // \Var in use on the BREW screen UI
+    float shot_stop_on_custom_weight; // \Var in use on the BREW screen UI
+    uint16_t shot_preset; // \Var in use on the BREW screen UI
+} lcd_controller_profile_t; // \Var in use on the BREW screen UI
 
 /**
  * @brief Global settings/calibration values mirrored from `eepromValues_t`.
@@ -123,11 +123,11 @@ typedef struct {
     uint16_t main_divider;
     uint16_t brew_divider;
 
-    uint8_t active_profile;
+    uint8_t active_profile; // \Var in use on the BREW screen UI
 
     uint16_t power_line_frequency;
     uint16_t lcd_sleep;
-    bool warmup_state;
+    bool warmup_state; // \Var in use on the BREW screen UI
     bool home_on_shot_finish;
     bool brew_delta_state;
     bool basket_prefill;
@@ -141,16 +141,16 @@ typedef struct {
     uint8_t led_r;
     uint8_t led_g;
     uint8_t led_b;
-} lcd_controller_settings_t;
+} lcd_controller_settings_t; // \Var in use on the BREW screen UI
 
 /**
  * @brief Full payload contract for LCD/controller profile + settings sync.
  */
 typedef struct {
-    uint16_t schema_version;
-    lcd_controller_settings_t settings;
-    lcd_controller_profile_t profiles[LCD_CONTROLLER_MAX_PROFILES];
-} lcd_controller_dataset_t;
+    uint16_t schema_version; // \Var in use on the BREW screen UI
+    lcd_controller_settings_t settings; // \Var in use on the BREW screen UI
+    lcd_controller_profile_t profiles[LCD_CONTROLLER_MAX_PROFILES]; // \Var in use on the BREW screen UI
+} lcd_controller_dataset_t; // \Var in use on the BREW screen UI
 
 /**
  * @brief Runtime shot data shown on LCD graph pages.
@@ -158,18 +158,18 @@ typedef struct {
  * Mirrors Gaggiuino `ShotSnapshot`.
  */
 typedef struct {
-    uint32_t time_in_shot_ms;
-    float pressure_bar;
+    uint32_t time_in_shot_ms; // \Var in use on the BREW screen UI
+    float pressure_bar; // \Var in use on the BREW screen UI
     float pump_flow_ml_s;
     float weight_flow_g_s;
-    float temperature_c;
-    float shot_weight_g;
+    float temperature_c; // \Var in use on the BREW screen UI
+    float shot_weight_g; // \Var in use on the BREW screen UI
     float water_pumped_ml;
 
-    float target_temperature_c;
+    float target_temperature_c; // \Var in use on the BREW screen UI
     float target_pump_flow_ml_s;
-    float target_pressure_bar;
-} lcd_controller_shot_snapshot_t;
+    float target_pressure_bar; // \Var in use on the BREW screen UI
+} lcd_controller_shot_snapshot_t; // \Var in use on the BREW screen UI
 
 /**
  * @brief Generic phase stop conditions used by profiling data.

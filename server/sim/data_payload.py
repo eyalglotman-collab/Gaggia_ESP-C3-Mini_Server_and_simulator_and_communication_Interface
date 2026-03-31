@@ -628,6 +628,7 @@ class DataPayloadManager:
         pressure_values: list[float] = []
         flow_values: list[float] = []
         temperature_values: list[float] = []
+        weight_values: list[float] = []
         sample_cursor = 0
         profile_samples: dict[str, list[float]] | None = None
         if brew_mode:
@@ -636,7 +637,8 @@ class DataPayloadManager:
                 pressure_table = profile_samples.get("pressure_bar", [])
                 flow_table = profile_samples.get("flow_ml_s", [])
                 temperature_table = profile_samples.get("temperature_c", [])
-                sample_count = min(len(pressure_table), len(flow_table), len(temperature_table))
+                weight_table = profile_samples.get("weight_g", [])
+                sample_count = min(len(pressure_table), len(flow_table), len(temperature_table), len(weight_table))
                 if sample_count > 0:
                     if brew_elapsed_sec >= brew_time_sec:
                         sample_cursor = sample_count - 1
@@ -651,7 +653,8 @@ class DataPayloadManager:
                         pressure_values.append(float(pressure_table[idx]))
                         flow_values.append(float(flow_table[idx]))
                         temperature_values.append(float(temperature_table[idx]))
-            if not pressure_values or not flow_values or not temperature_values:
+                        weight_values.append(float(weight_table[idx]))
+            if not pressure_values or not flow_values or not temperature_values or not weight_values:
                 sample_dt_sec = packet_interval_s / float(BREW_SAMPLES_PER_CHANNEL)
                 pressure_values, flow_values, temperature_values = self._build_brew_channels(
                     brew_elapsed_sec,
@@ -661,6 +664,12 @@ class DataPayloadManager:
                     target_temperature_c=brew_target_temperature_c,
                     brew_time_sec=brew_time_sec,
                 )
+                safe_brew_time_sec = max(0.001, brew_time_sec)
+                shot_target_estimate_g = max(0.0, brew_target_flow_ml_sec * brew_time_sec)
+                for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
+                    t_sec = brew_elapsed_sec + (sample_dt_sec * float(sample_index))
+                    progress = max(0.0, min(t_sec / safe_brew_time_sec, 1.0))
+                    weight_values.append(float(max(0.0, shot_target_estimate_g * progress)))
                 sample_cursor = max(0, len(pressure_values) - 1)
 
             floats = [0.0] * DATA_SIZE_FLOATS
@@ -668,6 +677,7 @@ class DataPayloadManager:
                 floats[sample_index] = pressure_values[sample_index]
                 floats[BREW_SAMPLES_PER_CHANNEL + sample_index] = flow_values[sample_index]
                 floats[(2 * BREW_SAMPLES_PER_CHANNEL) + sample_index] = temperature_values[sample_index]
+                floats[(3 * BREW_SAMPLES_PER_CHANNEL) + sample_index] = weight_values[sample_index]
 
             text = (
                 f"brew=on;profile={brew_profile_id};name={brew_profile_name};"
@@ -768,6 +778,12 @@ class DataPayloadManager:
                 if temp_slot >= DATA_SIZE_FLOATS:
                     break
                 floats[temp_slot] = float(home_temperature_c)
+            # Keep a deterministic weight channel in non-brew mode too.
+            for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
+                weight_slot = (3 * BREW_SAMPLES_PER_CHANNEL) + sample_index
+                if weight_slot >= DATA_SIZE_FLOATS:
+                    break
+                floats[weight_slot] = float(home_weight_g)
 
         brew_home_state = LCDControllerBrewHomeState(
             profile_id=int(brew_profile_id),
