@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
@@ -51,7 +52,7 @@
 #define BRIDGE_TCP_PORT                 3333
 #define BRIDGE_TCP_RX_BUFFER_SIZE       (BRIDGE_FRAME_MAX_SIZE * 3)
 #define BRIDGE_KEEPALIVE_PERIOD_MS      300
-#define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 450
+#define BRIDGE_KEEPALIVE_WAIT_WINDOW_MS 500
 #define BRIDGE_RUNNING_INTEGER_RETRY_LIMIT 3U
 #define BRIDGE_REALTIME_DATA_PAYLOAD_SIZE_BYTES ((uint16_t)BRIDGE_REALTIME_DATA_PAYLOAD_BYTES)
 
@@ -163,6 +164,7 @@ static void bridge_send_frame_binary(bridge_transport_t transport,
                                      const bridge_frame_t *request_frame,
                                      const uint8_t *payload_data,
                                      size_t payload_length);
+static bool bridge_send_tcp_all(const uint8_t *frame, size_t frame_length);
 static bool bridge_is_keepalive_session_active(void);
 static void bridge_notify_realtime_data_halted(const char *reason_text);
 static void bridge_send_realtime_data_packet(void);
@@ -658,8 +660,77 @@ static void bridge_send_frame_binary(
     if (transport == BRIDGE_TRANSPORT_USB) {
         (void)usb_serial_jtag_write_bytes(frame, frame_length, pdMS_TO_TICKS(BRIDGE_POLL_DELAY_MS));
     } else if (transport == BRIDGE_TRANSPORT_TCP && s_tcp_client_fd >= 0) {
-        (void)send(s_tcp_client_fd, frame, frame_length, 0);
+        (void)bridge_send_tcp_all(frame, frame_length);
     }
+}
+
+/**
+ * @brief Send an entire TCP frame and handle transport errors explicitly.
+ *
+ * @details `send()` may return short writes on stream sockets. This helper
+ * retries until the whole frame is sent or a terminal socket error occurs.
+ * Any non-recoverable send failure closes the current client socket so the
+ * state machine can reconnect cleanly.
+ *
+ * @param[in] frame Fully encoded frame bytes.
+ * @param[in] frame_length Number of bytes to send.
+ *
+ * @return `true` when all bytes were sent; otherwise `false`.
+ */
+static bool bridge_send_tcp_all(const uint8_t *frame, size_t frame_length)
+{
+    size_t total_sent = 0U;
+
+    if (frame == NULL || frame_length == 0U || s_tcp_client_fd < 0) {
+        return false;
+    }
+
+    while (total_sent < frame_length) {
+        ssize_t sent = send(
+            s_tcp_client_fd,
+            frame + total_sent,
+            frame_length - total_sent,
+            0);
+        if (sent > 0) {
+            total_sent += (size_t)sent;
+            continue;
+        }
+
+        if (sent == 0) {
+            bridge_record_error("tcp_send_closed");
+            ESP_LOGW(TAG,
+                     "TCP send returned 0 while sending frame (%u/%u bytes); closing client",
+                     (unsigned)total_sent,
+                     (unsigned)frame_length);
+            bridge_close_tcp_client();
+            return false;
+        }
+
+        int send_errno = errno;
+        if (send_errno == EINTR) {
+            continue;
+        }
+
+        if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) {
+            bridge_record_error("tcp_send_timeout");
+            ESP_LOGW(TAG,
+                     "TCP send timeout while sending frame (%u/%u bytes); closing client",
+                     (unsigned)total_sent,
+                     (unsigned)frame_length);
+        } else {
+            bridge_record_error("tcp_send_failed");
+            ESP_LOGW(TAG,
+                     "TCP send failed (errno=%d) while sending frame (%u/%u bytes); closing client",
+                     send_errno,
+                     (unsigned)total_sent,
+                     (unsigned)frame_length);
+        }
+
+        bridge_close_tcp_client();
+        return false;
+    }
+
+    return true;
 }
 
 /**
