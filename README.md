@@ -196,6 +196,22 @@ For every verification/build/flash task, Codex/Claude must use this exact gated 
 
 Post-flash monitor capture is optional and only required when explicitly requested.
 
+### Monitor Capture Method (Mandatory)
+
+When monitor capture is requested, this is the ONLY approved monitor command:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Espressif\Eyal_Projects_ESP32_S3\Eyal_espresso_server_simulator\scripts\monitor_capture.ps1 -Port <PORT> -BaudRate 115200 -DurationSec <SECONDS>
+```
+
+Mandatory rules:
+
+- Use exactly the command above for every monitor task.
+- Do not use `cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> monitor`.
+- Do not use direct `idf.py monitor`.
+- Do not use ad-hoc serial scripts or terminal serial tools for official monitor capture.
+- Keep the script's automatic pre-check, busy-port release, and post-monitor release/verification flow enabled.
+
 If any gate fails, the sequence is non-compliant and execution must stop immediately with:
 `RULE-GATED SEQUENCE BROKEN: <gate>`.
 
@@ -225,6 +241,26 @@ git -c user.name="Codex" -c user.email="codex@local" commit -m "docs: <message>"
   - `git@github.com:eyalglotman-collab/Gaggia_ESP-C3-Mini_Server_and_simulator_and_communication_Interface.git`
 - Do not perform official versioning or release commits in temporary/mirror copies.
 - `VERSION` and `firmware/esp32c3_bridge/VERSION` updates, plus release tags, must match the commit history of this GitHub repository.
+
+## Cross-Project Version Governance Rule (MUST)
+
+This is a MUST rule. Codex/Claude must continuously track and maintain the following three version lines and apply the existing X.Y.Z versioning rules to the correct scope:
+
+- Client FW version:
+  - Scope: ESP32-S3 firmware code plus all docs and scripts in `Eyal_espresso_client`.
+  - Version file: `Eyal_espresso_client/VERSION`.
+- Server FW version:
+  - Scope: ESP32-C3 bridge firmware code in `Eyal_espresso_server_simulator/firmware/esp32c3_bridge`.
+  - Version file: `Eyal_espresso_server_simulator/firmware/esp32c3_bridge/VERSION`.
+- Server Simulator version:
+  - Scope: backend Python, web interface, and all docs and scripts in `Eyal_espresso_server_simulator` (excluding bridge firmware-only changes).
+  - Version file: `Eyal_espresso_server_simulator/VERSION`.
+
+Mandatory behavior:
+
+- If a change affects one scope, bump only that scope's version.
+- If a change affects multiple scopes, bump each affected scope in the same release cycle.
+- Version bumps must be committed together with the corresponding code/doc/script changes in the authoritative GitHub repositories.
 
 ## Workspace Review Rules
 

@@ -2,11 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.3.1\par
-- Bridge Firmware Version: 0.1.24\par
-- Summary: Patch release: aligned simulator API tests with the active runtime contract and refreshed README API/rule guidance.\par
+- Version: 0.3.7\par
+- Bridge Firmware Version: 0.1.25\par
+- Summary: Added profile-specific brew timelines with realistic pressure/flow/temperature curves, disabled non-brew continuous weight traffic, and formalized monitor/version governance rules in README.\par
 \par
 \b X=0, Y=3\b0\par
+\b 2026-04-01 16:53:00\b0\par
+- Version: 0.3.7\par
+- Firmware Version: 0.1.25\par
+- Summary: Updated simulator brew realism and non-brew weight validity handling, and codified mandatory monitor/version governance rules.\par
+- Notes: `server/sim/data_payload.py` now defines per-profile `brew_time_sec` values and piecewise profile curves for pressure/flow/temperature generation, builds profile sample libraries using those durations, preserves profile-specific brew duration through profile selection/start, and initializes the active profile defaults during manager construction. Non-brew payload generation now writes `-1.0` in the weight channel and clears legacy weight-valid bits so the client does not plot continuous weight when brewing is inactive. `README.md` now explicitly mandates `scripts/monitor_capture.ps1` as the only approved monitor method and formalizes the cross-project MUST version-governance rule for client FW, server FW, and simulator version scopes.\par
+\par
 \b 2026-03-25 14:00:00\b0\par
 - Version: 0.3.1\par
 - Firmware Version: 0.1.24\par

@@ -23,6 +23,7 @@ from threading import Event, Lock, Thread
 from typing import Callable, Optional
 
 from server.communication.data_structures_lcd_controller import (
+    LCD_CONTROLLER_BREW_VALID_WEIGHT,
     LCDControllerBrewHomeState,
     brew_home_state_to_legacy_int_slots,
 )
@@ -71,6 +72,10 @@ DEFAULT_HOME_WATER_LEVEL_PCT: float = 92.0
 DEFAULT_HOME_WEIGHT_G: float = 0.0
 DEFAULT_HOME_SHOT_TARGET_G: float = 36.0
 
+# Profile targets and curve shapes are tuned to published espresso ranges:
+# - classic 9-bar baseline and 20-30 s recipes
+# - turbo-shot lower-pressure/short-time extraction behavior
+# - light-roast higher brew-temperature guidance
 PROFILE_PRESETS: tuple[dict[str, object], ...] = (
     {
         "id": 1,
@@ -78,67 +83,187 @@ PROFILE_PRESETS: tuple[dict[str, object], ...] = (
         "target_temperature_c": 93.0,
         "target_pressure_bar": 9.0,
         "target_flow_ml_sec": 2.2,
+        "brew_time_sec": 28.0,
         "preinfusion_seconds": 4.0,
         "shot_target_g": 36.0,
+        "pressure_curve": (
+            (0.00, 0.00),
+            (0.10, 0.30),
+            (0.25, 0.95),
+            (0.80, 1.00),
+            (1.00, 0.92),
+        ),
+        "flow_curve": (
+            (0.00, 0.00),
+            (0.10, 0.18),
+            (0.25, 0.65),
+            (0.70, 0.90),
+            (1.00, 1.00),
+        ),
+        "temperature_curve": (
+            (0.00, 0.00),
+            (0.25, 0.72),
+            (0.60, 0.93),
+            (1.00, 1.00),
+        ),
     },
     {
         "id": 2,
         "name": "Turbo Shot",
         "target_temperature_c": 91.0,
-        "target_pressure_bar": 7.5,
-        "target_flow_ml_sec": 3.0,
+        "target_pressure_bar": 6.5,
+        "target_flow_ml_sec": 2.8,
+        "brew_time_sec": 15.0,
         "preinfusion_seconds": 2.0,
-        "shot_target_g": 30.0,
+        "shot_target_g": 34.0,
+        "pressure_curve": (
+            (0.00, 0.00),
+            (0.06, 0.70),
+            (0.16, 1.00),
+            (0.65, 0.92),
+            (1.00, 0.84),
+        ),
+        "flow_curve": (
+            (0.00, 0.00),
+            (0.05, 0.70),
+            (0.18, 1.00),
+            (0.75, 0.95),
+            (1.00, 0.88),
+        ),
+        "temperature_curve": (
+            (0.00, 0.00),
+            (0.20, 0.86),
+            (0.55, 0.95),
+            (1.00, 1.00),
+        ),
     },
     {
         "id": 3,
         "name": "Light Roast",
-        "target_temperature_c": 96.0,
-        "target_pressure_bar": 9.5,
-        "target_flow_ml_sec": 1.8,
+        "target_temperature_c": 97.0,
+        "target_pressure_bar": 9.2,
+        "target_flow_ml_sec": 1.7,
+        "brew_time_sec": 35.0,
         "preinfusion_seconds": 6.0,
-        "shot_target_g": 40.0,
+        "shot_target_g": 42.0,
+        "pressure_curve": (
+            (0.00, 0.00),
+            (0.18, 0.20),
+            (0.34, 0.84),
+            (0.72, 1.00),
+            (1.00, 0.95),
+        ),
+        "flow_curve": (
+            (0.00, 0.00),
+            (0.16, 0.10),
+            (0.36, 0.46),
+            (0.74, 0.78),
+            (1.00, 0.90),
+        ),
+        "temperature_curve": (
+            (0.00, 0.00),
+            (0.28, 0.82),
+            (0.65, 0.95),
+            (1.00, 1.00),
+        ),
     },
 )
 
 BREW_PROFILE_SAMPLE_DT_SEC: float = 0.1
-BREW_PROFILE_SAMPLE_COUNT: int = int(DEFAULT_BREW_TIME_SEC / BREW_PROFILE_SAMPLE_DT_SEC) + 1
+
+
+def _piecewise_curve_value(progress: float, points: tuple[tuple[float, float], ...]) -> float:
+    """@brief Evaluate a piecewise-linear curve at normalized progress.
+
+    @details ``points`` is an ordered tuple of ``(x, y)`` pairs in normalized
+    time/value space where ``x`` spans ``0.0..1.0``. Values are linearly
+    interpolated between segment endpoints.
+    """
+
+    if not points:
+        return 0.0
+
+    clamped_progress = max(0.0, min(1.0, float(progress)))
+    first_x, first_y = points[0]
+    if clamped_progress <= first_x:
+        return float(first_y)
+
+    for index in range(1, len(points)):
+        x0, y0 = points[index - 1]
+        x1, y1 = points[index]
+        if clamped_progress <= x1:
+            span = x1 - x0
+            if span <= 1e-6:
+                return float(y1)
+            local_t = (clamped_progress - x0) / span
+            return float(y0 + ((y1 - y0) * local_t))
+
+    return float(points[-1][1])
 
 
 def _build_profile_sample_library() -> dict[int, dict[str, list[float]]]:
     """@brief Precompute deterministic brew samples for each profile in static memory."""
 
     library: dict[int, dict[str, list[float]]] = {}
-    sample_count = max(2, BREW_PROFILE_SAMPLE_COUNT)
 
     for profile in PROFILE_PRESETS:
         profile_id = int(profile.get("id", DEFAULT_BREW_PROFILE_ID))
+        brew_time_sec = max(BREW_PROFILE_SAMPLE_DT_SEC,
+                            float(profile.get("brew_time_sec", DEFAULT_BREW_TIME_SEC)))
+        sample_count = max(2, int(round(brew_time_sec / BREW_PROFILE_SAMPLE_DT_SEC)) + 1)
         target_pressure = float(profile.get("target_pressure_bar", DEFAULT_BREW_TARGET_PRESSURE_BAR))
         target_flow = float(profile.get("target_flow_ml_sec", DEFAULT_BREW_TARGET_FLOW_ML_SEC))
         target_temp = float(profile.get("target_temperature_c", DEFAULT_BREW_TARGET_TEMPERATURE_C))
         shot_target = float(profile.get("shot_target_g", DEFAULT_HOME_SHOT_TARGET_G))
+        pressure_curve = tuple(profile.get(
+            "pressure_curve",
+            ((0.0, 0.0), (0.25, 0.85), (1.0, 1.0)),
+        ))
+        flow_curve = tuple(profile.get(
+            "flow_curve",
+            ((0.0, 0.0), (0.25, 0.70), (1.0, 1.0)),
+        ))
+        temperature_curve = tuple(profile.get(
+            "temperature_curve",
+            ((0.0, 0.0), (0.30, 0.80), (1.0, 1.0)),
+        ))
         temp_start = max(20.0, target_temp - 8.0)
 
         pressure_samples: list[float] = []
         flow_samples: list[float] = []
         temperature_samples: list[float] = []
         weight_samples: list[float] = []
+        cumulative_weight = 0.0
 
         for index in range(sample_count):
             progress = float(index) / float(sample_count - 1)
-            pressure_samples.append(float(max(0.0, target_pressure * progress)))
-            flow_samples.append(float(max(0.0, target_flow * progress)))
-            temperature_samples.append(float(temp_start + ((target_temp - temp_start) * progress)))
-            weight_samples.append(float(max(0.0, shot_target * progress)))
+            pressure_ratio = max(0.0, _piecewise_curve_value(progress, pressure_curve))
+            flow_ratio = max(0.0, _piecewise_curve_value(progress, flow_curve))
+            temperature_ratio = max(0.0, min(1.0, _piecewise_curve_value(progress, temperature_curve)))
+
+            pressure_value = max(0.0, target_pressure * pressure_ratio)
+            flow_value = max(0.0, target_flow * flow_ratio)
+            temperature_value = temp_start + ((target_temp - temp_start) * temperature_ratio)
+
+            if index > 0:
+                cumulative_weight += flow_value * BREW_PROFILE_SAMPLE_DT_SEC
+
+            pressure_samples.append(float(pressure_value))
+            flow_samples.append(float(flow_value))
+            temperature_samples.append(float(temperature_value))
+            weight_samples.append(float(max(0.0, cumulative_weight)))
 
         if pressure_samples:
             pressure_samples[-1] = float(max(0.0, target_pressure))
         if flow_samples:
-            flow_samples[-1] = float(max(0.0, target_flow))
+            flow_samples[-1] = float(max(0.0, flow_samples[-1]))
         if temperature_samples:
             temperature_samples[-1] = float(target_temp)
-        if weight_samples:
-            weight_samples[-1] = max(0.0, shot_target)
+        if weight_samples and weight_samples[-1] > 0.0:
+            weight_scale = max(0.0, shot_target) / weight_samples[-1]
+            for index in range(len(weight_samples)):
+                weight_samples[index] = float(max(0.0, weight_samples[index] * weight_scale))
+            weight_samples[-1] = float(max(0.0, shot_target))
 
         library[profile_id] = {
             "pressure_bar": pressure_samples,
@@ -282,6 +407,7 @@ class DataPayloadManager:
         self._stop_event = Event()
         self._wake_event = Event()
         self._thread: Optional[Thread] = None
+        self._apply_profile_locked(self._resolve_profile_locked(DEFAULT_BREW_PROFILE_ID))
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -387,6 +513,7 @@ class DataPayloadManager:
                 "target_temperature_c": DEFAULT_BREW_TARGET_TEMPERATURE_C,
                 "target_pressure_bar": DEFAULT_BREW_TARGET_PRESSURE_BAR,
                 "target_flow_ml_sec": DEFAULT_BREW_TARGET_FLOW_ML_SEC,
+                "brew_time_sec": DEFAULT_BREW_TIME_SEC,
                 "preinfusion_seconds": 0.0,
                 "shot_target_g": DEFAULT_HOME_SHOT_TARGET_G,
             }
@@ -405,6 +532,7 @@ class DataPayloadManager:
         self._brew_target_pressure_bar = float(profile.get("target_pressure_bar", DEFAULT_BREW_TARGET_PRESSURE_BAR))
         self._brew_target_flow_ml_sec = float(profile.get("target_flow_ml_sec", DEFAULT_BREW_TARGET_FLOW_ML_SEC))
         self._brew_target_temperature_c = float(profile.get("target_temperature_c", DEFAULT_BREW_TARGET_TEMPERATURE_C))
+        self._brew_time_sec = max(1.0, float(profile.get("brew_time_sec", DEFAULT_BREW_TIME_SEC)))
         if self._home_shot_target_override_g is None:
             self._home_shot_target_g = float(profile.get("shot_target_g", DEFAULT_HOME_SHOT_TARGET_G))
         if self._home_temperature_override_c is None:
@@ -464,7 +592,6 @@ class DataPayloadManager:
         with self._lock:
             profile = self._resolve_profile_locked(profile_id)
             self._apply_profile_locked(profile)
-            self._brew_time_sec = DEFAULT_BREW_TIME_SEC
             self._last_control_event = "ProfileSelection"
         self._wake_event.set()
 
@@ -474,7 +601,6 @@ class DataPayloadManager:
         with self._lock:
             profile = self._resolve_profile_locked(profile_id)
             self._apply_profile_locked(profile)
-            self._brew_time_sec = DEFAULT_BREW_TIME_SEC
             del packet_interval_ms
             self._packet_interval_ms = DEFAULT_BREW_PACKET_INTERVAL_MS
             # Brew stream must stay dynamic; clear static overrides that can freeze progress.
@@ -778,12 +904,12 @@ class DataPayloadManager:
                 if temp_slot >= DATA_SIZE_FLOATS:
                     break
                 floats[temp_slot] = float(home_temperature_c)
-            # Keep a deterministic weight channel in non-brew mode too.
+            # Disable continuous weight-channel streaming outside active brew.
             for sample_index in range(BREW_SAMPLES_PER_CHANNEL):
                 weight_slot = (3 * BREW_SAMPLES_PER_CHANNEL) + sample_index
                 if weight_slot >= DATA_SIZE_FLOATS:
                     break
-                floats[weight_slot] = float(home_weight_g)
+                floats[weight_slot] = -1.0
 
         brew_home_state = LCDControllerBrewHomeState(
             profile_id=int(brew_profile_id),
@@ -803,6 +929,12 @@ class DataPayloadManager:
         )
         ints = brew_home_state_to_legacy_int_slots(brew_home_state)
         ints[0] = seq & 0x7FFFFFFF
+        if not brew_mode:
+            # Mark legacy weight slot invalid when brew is not active.
+            if len(ints) > 8:
+                ints[8] = -1
+            if len(ints) > 14:
+                ints[14] = int(ints[14]) & (~LCD_CONTROLLER_BREW_VALID_WEIGHT)
 
         payload = encode_downlink(seq, floats, ints, text)
         try:
