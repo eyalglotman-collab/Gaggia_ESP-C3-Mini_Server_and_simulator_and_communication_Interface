@@ -28,6 +28,7 @@ typedef enum {
 typedef enum {
     LCD_CONTROLLER_PROTOCOL_EVENT_NONE = 0,
     LCD_CONTROLLER_PROTOCOL_EVENT_SCHEMA_ACK,
+    LCD_CONTROLLER_PROTOCOL_EVENT_PROFILE_DATASET,
     LCD_CONTROLLER_PROTOCOL_EVENT_PROFILE_CATALOG,
 } lcd_controller_protocol_event_t;
 
@@ -40,6 +41,9 @@ typedef enum {
 #define LCD_CONTROLLER_PROTOCOL_CMD_PROFILE_CATALOG_GET \
     "LCDProtoProfileCatalogGet"
 
+#define LCD_CONTROLLER_PROTOCOL_CMD_PROFILE_DATASET_GET \
+    "LCDProtoProfileDatasetGet"
+
 /**
  * @brief Protocol peer event prefixes received from simulator.
  */
@@ -48,6 +52,9 @@ typedef enum {
 
 #define LCD_CONTROLLER_PROTOCOL_EVENT_PREFIX_PROFILE_CATALOG \
     "LCDProtoProfileCatalog"
+
+#define LCD_CONTROLLER_PROTOCOL_EVENT_PREFIX_PROFILE_DATASET \
+    "LCDProtoProfileDataset"
 
 #ifdef __cplusplus
 }

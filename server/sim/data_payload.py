@@ -23,8 +23,10 @@ from threading import Event, Lock, Thread
 from typing import Callable, Optional
 
 from server.communication.data_structures_lcd_controller import (
+    LCD_CONTROLLER_DATA_SCHEMA_VERSION,
     LCD_CONTROLLER_BREW_VALID_WEIGHT,
     LCDControllerBrewHomeState,
+    build_lcd_dataset_from_presets,
     brew_home_state_to_legacy_int_slots,
 )
 
@@ -61,7 +63,9 @@ DEFAULT_BREW_PACKET_INTERVAL_MS: int = 100
 MIN_PACKET_INTERVAL_MS: int = 10
 MAX_PACKET_INTERVAL_MS: int = 5000
 SIM_FLOAT_BYTES_PER_PACKET: int = DATA_SIZE_FLOATS * 4
-BREW_SAMPLES_PER_CHANNEL: int = 10
+# Brew packet density:
+# - 5 samples per channel every 100 ms packet => 50 samples/sec per parameter.
+BREW_SAMPLES_PER_CHANNEL: int = 5
 DEFAULT_BREW_PROFILE_ID: int = 1
 DEFAULT_BREW_PROFILE_NAME: str = "Classic 9 Bar"
 DEFAULT_BREW_TIME_SEC: float = 30.0
@@ -72,104 +76,482 @@ DEFAULT_HOME_WATER_LEVEL_PCT: float = 92.0
 DEFAULT_HOME_WEIGHT_G: float = 0.0
 DEFAULT_HOME_SHOT_TARGET_G: float = 36.0
 
-# Profile targets and curve shapes are tuned to published espresso ranges:
-# - classic 9-bar baseline and 20-30 s recipes
-# - turbo-shot lower-pressure/short-time extraction behavior
-# - light-roast higher brew-temperature guidance
+# Profile presets mirror the EEPROM-style profile struct used by Gaggiuino.
+# Each profile also carries a simulator-only stage list and curve helpers to
+# generate deterministic brew waveforms for client plotting.
+LCD_SETTINGS_PRESET: dict[str, object] = {
+    "steam_setpoint": 1450,
+    "offset_temp": 0,
+    "hpwr": 1000,
+    "main_divider": 100,
+    "brew_divider": 100,
+    "active_profile": 1,
+    "power_line_frequency": 50,
+    "lcd_sleep": 30,
+    "warmup_state": True,
+    "home_on_shot_finish": True,
+    "brew_delta_state": False,
+    "basket_prefill": False,
+    "scales_f1": 1,
+    "scales_f2": 1,
+    "pump_flow_at_zero": 0.0,
+    "led_state": True,
+    "led_disco": False,
+    "led_r": 255,
+    "led_g": 188,
+    "led_b": 122,
+}
+
+
+def _build_stage(
+    name: str,
+    *,
+    kind: str,
+    pressure_start: float,
+    pressure_end: float,
+    flow_start: float,
+    flow_end: float,
+    temperature_start_c: float,
+    temperature_end_c: float,
+    duration_sec: float,
+    transition_curve: str,
+    restriction: float = 0.0,
+    stop_weight_g: float = 0.0,
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "type": kind,
+        "pressure_start_bar": float(pressure_start),
+        "pressure_end_bar": float(pressure_end),
+        "flow_start_ml_s": float(flow_start),
+        "flow_end_ml_s": float(flow_end),
+        "temperature_start_c": float(temperature_start_c),
+        "temperature_end_c": float(temperature_end_c),
+        "duration_sec": float(duration_sec),
+        "transition_curve": transition_curve,
+        "restriction": float(restriction),
+        "stop_weight_g": float(stop_weight_g),
+    }
+
+
+def _build_profile_preset(
+    *,
+    profile_id: int,
+    name: str,
+    setpoint_c: float,
+    target_pressure_bar: float,
+    target_flow_ml_s: float,
+    brew_time_sec: float,
+    preinfusion_sec: int,
+    shot_target_g: float,
+    pressure_curve: tuple[tuple[float, float], ...],
+    flow_curve: tuple[tuple[float, float], ...],
+    temperature_curve: tuple[tuple[float, float], ...],
+    stages: tuple[dict[str, object], ...],
+) -> dict[str, object]:
+    setpoint_deci_c = int(round(setpoint_c * 10.0))
+    preinf_bar = max(0.5, target_pressure_bar * 0.30)
+    preinf_flow = max(0.3, target_flow_ml_s * 0.45)
+    return {
+        "id": int(profile_id),
+        "name": name,
+        "preinfusion_state": bool(preinfusion_sec > 0),
+        "preinfusion_flow_state": False,
+        "preinfusion_sec": int(max(0, preinfusion_sec)),
+        "preinfusion_bar": float(preinf_bar),
+        "preinfusion_flow_vol": float(preinf_flow),
+        "preinfusion_flow_time": int(max(0, preinfusion_sec)),
+        "preinfusion_flow_pressure_target": float(target_pressure_bar),
+        "preinfusion_pressure_flow_target": float(target_flow_ml_s),
+        "preinfusion_filled": 0.0,
+        "preinfusion_pressure_above": False,
+        "preinfusion_weight_above": 0.0,
+        "soak_state": True,
+        "soak_time_pressure": int(max(0, preinfusion_sec // 2)),
+        "soak_time_flow": int(max(0, preinfusion_sec // 2)),
+        "soak_keep_pressure": float(max(0.5, target_pressure_bar * 0.45)),
+        "soak_keep_flow": float(max(0.3, target_flow_ml_s * 0.45)),
+        "soak_below_pressure": 0.0,
+        "soak_above_pressure": float(max(0.0, target_pressure_bar * 0.95)),
+        "soak_above_weight": float(max(0.0, shot_target_g * 0.15)),
+        "preinfusion_ramp": int(max(1, preinfusion_sec)),
+        "preinfusion_ramp_slope": int(max(1, preinfusion_sec * 100)),
+        "tp_state": True,
+        "tp_type": True,
+        "tp_profiling_start": float(max(0.0, target_pressure_bar * 0.30)),
+        "tp_profiling_finish": float(target_pressure_bar),
+        "tp_profiling_hold": int(max(0, round(brew_time_sec * 0.40))),
+        "tp_profiling_hold_limit": float(target_pressure_bar),
+        "tp_profiling_slope": int(max(1, round(brew_time_sec * 80.0))),
+        "tp_profiling_slope_shape": 0,
+        "tp_profiling_flow_restriction": float(max(0.0, target_flow_ml_s * 1.2)),
+        "tf_profile_start": float(max(0.0, target_flow_ml_s * 0.35)),
+        "tf_profile_end": float(target_flow_ml_s),
+        "tf_profile_hold": int(max(0, round(brew_time_sec * 0.40))),
+        "tf_profile_hold_limit": float(target_flow_ml_s),
+        "tf_profile_slope": int(max(1, round(brew_time_sec * 80.0))),
+        "tf_profile_slope_shape": 3,
+        "tf_profiling_pressure_restriction": float(max(0.0, target_pressure_bar * 1.2)),
+        "profiling_state": True,
+        "mf_profile_state": True,
+        "mp_profiling_start": float(max(0.0, target_pressure_bar * 0.45)),
+        "mp_profiling_finish": float(target_pressure_bar),
+        "mp_profiling_slope": int(max(1, round(brew_time_sec * 50.0))),
+        "mp_profiling_slope_shape": 3,
+        "mp_profiling_flow_restriction": float(max(0.0, target_flow_ml_s * 1.1)),
+        "mf_profile_start": float(max(0.0, target_flow_ml_s * 0.45)),
+        "mf_profile_end": float(target_flow_ml_s),
+        "mf_profile_slope": int(max(1, round(brew_time_sec * 50.0))),
+        "mf_profile_slope_shape": 3,
+        "mf_profiling_pressure_restriction": float(max(0.0, target_pressure_bar * 1.1)),
+        "setpoint": int(max(800, min(1100, setpoint_deci_c))),
+        "stop_on_weight_state": True,
+        "shot_dose": 18.0,
+        "shot_stop_on_custom_weight": float(shot_target_g),
+        "shot_preset": int(max(0, profile_id - 1)),
+        "target_temperature_c": float(setpoint_c),
+        "target_pressure_bar": float(target_pressure_bar),
+        "target_flow_ml_sec": float(target_flow_ml_s),
+        "brew_time_sec": float(brew_time_sec),
+        "preinfusion_seconds": float(preinfusion_sec),
+        "shot_target_g": float(shot_target_g),
+        "pressure_curve": pressure_curve,
+        "flow_curve": flow_curve,
+        "temperature_curve": temperature_curve,
+        "stages": [dict(stage) for stage in stages],
+    }
+
+
 PROFILE_PRESETS: tuple[dict[str, object], ...] = (
-    {
-        "id": 1,
-        "name": "Classic 9 Bar",
-        "target_temperature_c": 93.0,
-        "target_pressure_bar": 9.0,
-        "target_flow_ml_sec": 2.2,
-        "brew_time_sec": 28.0,
-        "preinfusion_seconds": 4.0,
-        "shot_target_g": 36.0,
-        "pressure_curve": (
-            (0.00, 0.00),
-            (0.10, 0.30),
-            (0.25, 0.95),
-            (0.80, 1.00),
-            (1.00, 0.92),
+    _build_profile_preset(
+        profile_id=1,
+        name="Classic 9 Bar",
+        setpoint_c=93.0,
+        target_pressure_bar=9.0,
+        target_flow_ml_s=2.2,
+        brew_time_sec=28.0,
+        preinfusion_sec=4,
+        shot_target_g=36.0,
+        pressure_curve=((0.00, 0.00), (0.12, 0.35), (0.28, 0.95), (0.82, 1.00), (1.00, 0.92)),
+        flow_curve=((0.00, 0.00), (0.10, 0.20), (0.26, 0.68), (0.72, 0.90), (1.00, 1.00)),
+        temperature_curve=((0.00, 0.00), (0.22, 0.70), (0.58, 0.92), (1.00, 1.00)),
+        stages=(
+            _build_stage(
+                "Preinfusion",
+                kind="pressure",
+                pressure_start=0.0,
+                pressure_end=2.8,
+                flow_start=0.0,
+                flow_end=1.0,
+                temperature_start_c=89.0,
+                temperature_end_c=91.5,
+                duration_sec=4.0,
+                transition_curve="ease_in",
+                stop_weight_g=3.0,
+            ),
+            _build_stage(
+                "Ramp",
+                kind="pressure",
+                pressure_start=2.8,
+                pressure_end=9.0,
+                flow_start=1.0,
+                flow_end=2.0,
+                temperature_start_c=91.5,
+                temperature_end_c=93.0,
+                duration_sec=6.0,
+                transition_curve="ease_out",
+            ),
+            _build_stage(
+                "Hold",
+                kind="pressure",
+                pressure_start=9.0,
+                pressure_end=9.0,
+                flow_start=2.0,
+                flow_end=2.2,
+                temperature_start_c=93.0,
+                temperature_end_c=93.0,
+                duration_sec=14.0,
+                transition_curve="linear",
+            ),
+            _build_stage(
+                "Finish",
+                kind="flow",
+                pressure_start=9.0,
+                pressure_end=8.2,
+                flow_start=2.2,
+                flow_end=2.0,
+                temperature_start_c=93.0,
+                temperature_end_c=92.8,
+                duration_sec=4.0,
+                transition_curve="ease_in_out",
+                stop_weight_g=36.0,
+            ),
         ),
-        "flow_curve": (
-            (0.00, 0.00),
-            (0.10, 0.18),
-            (0.25, 0.65),
-            (0.70, 0.90),
-            (1.00, 1.00),
+    ),
+    _build_profile_preset(
+        profile_id=2,
+        name="Turbo Shot",
+        setpoint_c=91.0,
+        target_pressure_bar=6.5,
+        target_flow_ml_s=2.9,
+        brew_time_sec=18.0,
+        preinfusion_sec=2,
+        shot_target_g=34.0,
+        pressure_curve=((0.00, 0.00), (0.08, 0.65), (0.20, 1.00), (0.72, 0.90), (1.00, 0.82)),
+        flow_curve=((0.00, 0.00), (0.08, 0.68), (0.20, 1.00), (0.74, 0.96), (1.00, 0.90)),
+        temperature_curve=((0.00, 0.00), (0.22, 0.84), (0.58, 0.95), (1.00, 1.00)),
+        stages=(
+            _build_stage(
+                "Quick Wetting",
+                kind="flow",
+                pressure_start=0.0,
+                pressure_end=3.0,
+                flow_start=0.0,
+                flow_end=2.0,
+                temperature_start_c=88.0,
+                temperature_end_c=90.0,
+                duration_sec=2.0,
+                transition_curve="ease_in",
+            ),
+            _build_stage(
+                "Turbo Rise",
+                kind="flow",
+                pressure_start=3.0,
+                pressure_end=6.5,
+                flow_start=2.0,
+                flow_end=2.9,
+                temperature_start_c=90.0,
+                temperature_end_c=91.0,
+                duration_sec=4.0,
+                transition_curve="ease_out",
+            ),
+            _build_stage(
+                "Turbo Hold",
+                kind="flow",
+                pressure_start=6.5,
+                pressure_end=6.2,
+                flow_start=2.9,
+                flow_end=2.8,
+                temperature_start_c=91.0,
+                temperature_end_c=91.0,
+                duration_sec=8.0,
+                transition_curve="linear",
+            ),
+            _build_stage(
+                "Turbo Finish",
+                kind="flow",
+                pressure_start=6.2,
+                pressure_end=5.3,
+                flow_start=2.8,
+                flow_end=2.6,
+                temperature_start_c=91.0,
+                temperature_end_c=90.7,
+                duration_sec=4.0,
+                transition_curve="ease_in_out",
+                stop_weight_g=34.0,
+            ),
         ),
-        "temperature_curve": (
-            (0.00, 0.00),
-            (0.25, 0.72),
-            (0.60, 0.93),
-            (1.00, 1.00),
+    ),
+    _build_profile_preset(
+        profile_id=3,
+        name="Light Roast",
+        setpoint_c=97.0,
+        target_pressure_bar=9.4,
+        target_flow_ml_s=1.7,
+        brew_time_sec=35.0,
+        preinfusion_sec=6,
+        shot_target_g=42.0,
+        pressure_curve=((0.00, 0.00), (0.18, 0.24), (0.36, 0.84), (0.76, 1.00), (1.00, 0.95)),
+        flow_curve=((0.00, 0.00), (0.16, 0.12), (0.40, 0.48), (0.76, 0.82), (1.00, 0.92)),
+        temperature_curve=((0.00, 0.00), (0.28, 0.82), (0.66, 0.95), (1.00, 1.00)),
+        stages=(
+            _build_stage(
+                "Gentle Preinfusion",
+                kind="pressure",
+                pressure_start=0.0,
+                pressure_end=2.2,
+                flow_start=0.0,
+                flow_end=0.8,
+                temperature_start_c=92.0,
+                temperature_end_c=95.0,
+                duration_sec=6.0,
+                transition_curve="ease_in",
+                stop_weight_g=4.0,
+            ),
+            _build_stage(
+                "Progressive Ramp",
+                kind="pressure",
+                pressure_start=2.2,
+                pressure_end=9.4,
+                flow_start=0.8,
+                flow_end=1.5,
+                temperature_start_c=95.0,
+                temperature_end_c=97.0,
+                duration_sec=10.0,
+                transition_curve="ease_in_out",
+            ),
+            _build_stage(
+                "Extraction Hold",
+                kind="pressure",
+                pressure_start=9.4,
+                pressure_end=9.0,
+                flow_start=1.5,
+                flow_end=1.7,
+                temperature_start_c=97.0,
+                temperature_end_c=97.0,
+                duration_sec=14.0,
+                transition_curve="linear",
+            ),
+            _build_stage(
+                "Sweetness Tail",
+                kind="flow",
+                pressure_start=9.0,
+                pressure_end=8.5,
+                flow_start=1.7,
+                flow_end=1.6,
+                temperature_start_c=97.0,
+                temperature_end_c=96.7,
+                duration_sec=5.0,
+                transition_curve="ease_out",
+                stop_weight_g=42.0,
+            ),
         ),
-    },
-    {
-        "id": 2,
-        "name": "Turbo Shot",
-        "target_temperature_c": 91.0,
-        "target_pressure_bar": 6.5,
-        "target_flow_ml_sec": 2.8,
-        "brew_time_sec": 15.0,
-        "preinfusion_seconds": 2.0,
-        "shot_target_g": 34.0,
-        "pressure_curve": (
-            (0.00, 0.00),
-            (0.06, 0.70),
-            (0.16, 1.00),
-            (0.65, 0.92),
-            (1.00, 0.84),
+    ),
+    _build_profile_preset(
+        profile_id=4,
+        name="Blooming Filter",
+        setpoint_c=94.0,
+        target_pressure_bar=7.0,
+        target_flow_ml_s=2.1,
+        brew_time_sec=30.0,
+        preinfusion_sec=5,
+        shot_target_g=40.0,
+        pressure_curve=((0.00, 0.00), (0.14, 0.28), (0.30, 0.76), (0.78, 0.95), (1.00, 0.88)),
+        flow_curve=((0.00, 0.00), (0.12, 0.30), (0.28, 0.70), (0.80, 0.96), (1.00, 1.00)),
+        temperature_curve=((0.00, 0.00), (0.24, 0.74), (0.60, 0.93), (1.00, 1.00)),
+        stages=(
+            _build_stage(
+                "Bloom",
+                kind="flow",
+                pressure_start=0.0,
+                pressure_end=2.5,
+                flow_start=0.0,
+                flow_end=1.0,
+                temperature_start_c=90.0,
+                temperature_end_c=92.5,
+                duration_sec=5.0,
+                transition_curve="ease_in",
+            ),
+            _build_stage(
+                "Rise",
+                kind="flow",
+                pressure_start=2.5,
+                pressure_end=7.0,
+                flow_start=1.0,
+                flow_end=2.0,
+                temperature_start_c=92.5,
+                temperature_end_c=94.0,
+                duration_sec=8.0,
+                transition_curve="ease_in_out",
+            ),
+            _build_stage(
+                "Main Body",
+                kind="flow",
+                pressure_start=7.0,
+                pressure_end=6.6,
+                flow_start=2.0,
+                flow_end=2.1,
+                temperature_start_c=94.0,
+                temperature_end_c=94.0,
+                duration_sec=12.0,
+                transition_curve="linear",
+            ),
+            _build_stage(
+                "Tail",
+                kind="flow",
+                pressure_start=6.6,
+                pressure_end=6.0,
+                flow_start=2.1,
+                flow_end=1.9,
+                temperature_start_c=94.0,
+                temperature_end_c=93.6,
+                duration_sec=5.0,
+                transition_curve="ease_out",
+                stop_weight_g=40.0,
+            ),
         ),
-        "flow_curve": (
-            (0.00, 0.00),
-            (0.05, 0.70),
-            (0.18, 1.00),
-            (0.75, 0.95),
-            (1.00, 0.88),
+    ),
+    _build_profile_preset(
+        profile_id=5,
+        name="Ristretto Dense",
+        setpoint_c=92.0,
+        target_pressure_bar=9.8,
+        target_flow_ml_s=1.4,
+        brew_time_sec=24.0,
+        preinfusion_sec=3,
+        shot_target_g=30.0,
+        pressure_curve=((0.00, 0.00), (0.10, 0.40), (0.22, 0.95), (0.74, 1.00), (1.00, 0.96)),
+        flow_curve=((0.00, 0.00), (0.12, 0.18), (0.28, 0.58), (0.76, 0.90), (1.00, 1.00)),
+        temperature_curve=((0.00, 0.00), (0.24, 0.75), (0.60, 0.92), (1.00, 1.00)),
+        stages=(
+            _build_stage(
+                "Dense Preinfusion",
+                kind="pressure",
+                pressure_start=0.0,
+                pressure_end=3.5,
+                flow_start=0.0,
+                flow_end=0.7,
+                temperature_start_c=88.5,
+                temperature_end_c=90.5,
+                duration_sec=3.0,
+                transition_curve="ease_in",
+            ),
+            _build_stage(
+                "Pressure Ramp",
+                kind="pressure",
+                pressure_start=3.5,
+                pressure_end=9.8,
+                flow_start=0.7,
+                flow_end=1.2,
+                temperature_start_c=90.5,
+                temperature_end_c=92.0,
+                duration_sec=6.0,
+                transition_curve="ease_out",
+            ),
+            _build_stage(
+                "Dense Hold",
+                kind="pressure",
+                pressure_start=9.8,
+                pressure_end=9.5,
+                flow_start=1.2,
+                flow_end=1.4,
+                temperature_start_c=92.0,
+                temperature_end_c=92.0,
+                duration_sec=10.0,
+                transition_curve="linear",
+            ),
+            _build_stage(
+                "Ristretto End",
+                kind="pressure",
+                pressure_start=9.5,
+                pressure_end=9.1,
+                flow_start=1.4,
+                flow_end=1.3,
+                temperature_start_c=92.0,
+                temperature_end_c=91.8,
+                duration_sec=5.0,
+                transition_curve="ease_in_out",
+                stop_weight_g=30.0,
+            ),
         ),
-        "temperature_curve": (
-            (0.00, 0.00),
-            (0.20, 0.86),
-            (0.55, 0.95),
-            (1.00, 1.00),
-        ),
-    },
-    {
-        "id": 3,
-        "name": "Light Roast",
-        "target_temperature_c": 97.0,
-        "target_pressure_bar": 9.2,
-        "target_flow_ml_sec": 1.7,
-        "brew_time_sec": 35.0,
-        "preinfusion_seconds": 6.0,
-        "shot_target_g": 42.0,
-        "pressure_curve": (
-            (0.00, 0.00),
-            (0.18, 0.20),
-            (0.34, 0.84),
-            (0.72, 1.00),
-            (1.00, 0.95),
-        ),
-        "flow_curve": (
-            (0.00, 0.00),
-            (0.16, 0.10),
-            (0.36, 0.46),
-            (0.74, 0.78),
-            (1.00, 0.90),
-        ),
-        "temperature_curve": (
-            (0.00, 0.00),
-            (0.28, 0.82),
-            (0.65, 0.95),
-            (1.00, 1.00),
-        ),
-    },
+    ),
 )
 
-BREW_PROFILE_SAMPLE_DT_SEC: float = 0.1
+# Keep profile-library timeline aligned to brew packet density so brew duration
+# remains unchanged when plotting multiple samples per packet.
+BREW_PROFILE_SAMPLE_DT_SEC: float = (
+    float(DEFAULT_BREW_PACKET_INTERVAL_MS) / 1000.0 / float(BREW_SAMPLES_PER_CHANNEL)
+)
 
 
 def _piecewise_curve_value(progress: float, points: tuple[tuple[float, float], ...]) -> float:
@@ -364,7 +746,12 @@ class DataPayloadManager:
     def __init__(self) -> None:
         self._lock = Lock()
         self._ul_fifo: deque[dict] = deque(maxlen=FIFO_DEPTH)
-        self._profile_presets: list[dict[str, object]] = [dict(profile) for profile in PROFILE_PRESETS]
+        self._profile_presets: list[dict[str, object]] = [
+            {key: (list(value) if key == "stages" and isinstance(value, list) else value)
+             for key, value in profile.items()}
+            for profile in PROFILE_PRESETS
+        ]
+        self._lcd_settings: dict[str, object] = dict(LCD_SETTINGS_PRESET)
         self._profile_sample_library: dict[int, dict[str, list[float]]] = PROFILE_SAMPLE_LIBRARY
         self._dl_seq: int = 0
         self._ul_rx_count: int = 0
@@ -510,12 +897,15 @@ class DataPayloadManager:
             return {
                 "id": DEFAULT_BREW_PROFILE_ID,
                 "name": DEFAULT_BREW_PROFILE_NAME,
+                "setpoint": int(DEFAULT_BREW_TARGET_TEMPERATURE_C * 10.0),
                 "target_temperature_c": DEFAULT_BREW_TARGET_TEMPERATURE_C,
                 "target_pressure_bar": DEFAULT_BREW_TARGET_PRESSURE_BAR,
                 "target_flow_ml_sec": DEFAULT_BREW_TARGET_FLOW_ML_SEC,
                 "brew_time_sec": DEFAULT_BREW_TIME_SEC,
                 "preinfusion_seconds": 0.0,
+                "preinfusion_sec": 0,
                 "shot_target_g": DEFAULT_HOME_SHOT_TARGET_G,
+                "shot_stop_on_custom_weight": DEFAULT_HOME_SHOT_TARGET_G,
             }
 
         desired = self._selected_profile_id if profile_id is None else int(profile_id)
@@ -529,14 +919,26 @@ class DataPayloadManager:
 
         self._selected_profile_id = int(profile.get("id", DEFAULT_BREW_PROFILE_ID))
         self._selected_profile_name = str(profile.get("name", DEFAULT_BREW_PROFILE_NAME))
-        self._brew_target_pressure_bar = float(profile.get("target_pressure_bar", DEFAULT_BREW_TARGET_PRESSURE_BAR))
-        self._brew_target_flow_ml_sec = float(profile.get("target_flow_ml_sec", DEFAULT_BREW_TARGET_FLOW_ML_SEC))
-        self._brew_target_temperature_c = float(profile.get("target_temperature_c", DEFAULT_BREW_TARGET_TEMPERATURE_C))
+        self._brew_target_pressure_bar = float(profile.get(
+            "target_pressure_bar",
+            profile.get("tp_profiling_finish", DEFAULT_BREW_TARGET_PRESSURE_BAR),
+        ))
+        self._brew_target_flow_ml_sec = float(profile.get(
+            "target_flow_ml_sec",
+            profile.get("mf_profile_end", DEFAULT_BREW_TARGET_FLOW_ML_SEC),
+        ))
+        setpoint_deci_c = float(profile.get("setpoint", DEFAULT_BREW_TARGET_TEMPERATURE_C * 10.0))
+        target_temp_c = float(profile.get("target_temperature_c", setpoint_deci_c / 10.0))
+        self._brew_target_temperature_c = target_temp_c
         self._brew_time_sec = max(1.0, float(profile.get("brew_time_sec", DEFAULT_BREW_TIME_SEC)))
         if self._home_shot_target_override_g is None:
-            self._home_shot_target_g = float(profile.get("shot_target_g", DEFAULT_HOME_SHOT_TARGET_G))
+            self._home_shot_target_g = float(profile.get(
+                "shot_target_g",
+                profile.get("shot_stop_on_custom_weight", DEFAULT_HOME_SHOT_TARGET_G),
+            ))
         if self._home_temperature_override_c is None:
             self._home_temperature_c = self._brew_target_temperature_c
+        self._lcd_settings["active_profile"] = max(1, self._selected_profile_id)
 
     def configure_lcd_home_data(
         self,
@@ -560,6 +962,11 @@ class DataPayloadManager:
                 self._home_temperature_c = value
                 # Keep target + live temperature aligned with Screen-7 set input.
                 self._brew_target_temperature_c = value
+                for profile in self._profile_presets:
+                    if int(profile.get("id", 0)) == self._selected_profile_id:
+                        profile["setpoint"] = int(round(value * 10.0))
+                        profile["target_temperature_c"] = value
+                        break
             if water_level_pct is not None:
                 value = max(0.0, min(float(water_level_pct), 100.0))
                 self._home_water_level_override_pct = value
@@ -572,14 +979,47 @@ class DataPayloadManager:
                 value = max(0.0, min(float(shot_target_g), 200.0))
                 self._home_shot_target_override_g = value
                 self._home_shot_target_g = value
+                for profile in self._profile_presets:
+                    if int(profile.get("id", 0)) == self._selected_profile_id:
+                        profile["shot_stop_on_custom_weight"] = value
+                        profile["shot_target_g"] = value
+                        break
             if warmup_on is not None:
                 self._home_warmup_override = bool(warmup_on)
                 self._home_warmup_on = bool(warmup_on)
+                self._lcd_settings["warmup_state"] = bool(warmup_on)
             if steam_on is not None:
                 self._home_steam_override = bool(steam_on)
                 self._home_steam_on = bool(steam_on)
             self._last_control_event = "Screen7HomeDataSet"
         self._wake_event.set()
+
+    def get_lcd_profile_dataset(self) -> dict[str, object]:
+        """@brief Return normalized full LCD dataset (settings + profile structs)."""
+
+        with self._lock:
+            dataset = build_lcd_dataset_from_presets(
+                self._profile_presets,
+                self._lcd_settings,
+                schema_version=LCD_CONTROLLER_DATA_SCHEMA_VERSION,
+            )
+            profiles_with_stages: list[dict[str, object]] = []
+            for index, profile in enumerate(dataset["profiles"]):
+                merged_profile = dict(profile)
+                raw_profile = self._profile_presets[index] if index < len(self._profile_presets) else {}
+                raw_stages = raw_profile.get("stages", []) if isinstance(raw_profile, dict) else []
+                if isinstance(raw_stages, list):
+                    merged_profile["stages"] = [
+                        dict(stage) for stage in raw_stages if isinstance(stage, dict)
+                    ]
+                else:
+                    merged_profile["stages"] = []
+                profiles_with_stages.append(merged_profile)
+            return {
+                "schema_version": int(dataset["schema_version"]),
+                "settings": dict(dataset["settings"]),
+                "profiles": profiles_with_stages,
+            }
 
     def select_profile(self, profile_id: int | None = None, *, offline: bool | None = None) -> None:
         """@brief Select active brew profile metadata for the next StartBrew.
@@ -1021,6 +1461,11 @@ class DataPayloadManager:
                 if self._home_uptime_override_minutes is not None
                 else max(0.0, (time.monotonic() - self._home_started_monotonic) / 60.0)
             )
+            lcd_dataset = build_lcd_dataset_from_presets(
+                self._profile_presets,
+                self._lcd_settings,
+                schema_version=LCD_CONTROLLER_DATA_SCHEMA_VERSION,
+            )
             return {
                 "dl_tx_count": self._dl_tx_count,
                 "ul_rx_count": self._ul_rx_count,
@@ -1052,6 +1497,12 @@ class DataPayloadManager:
                 "home_last_uplink_preview": self._home_last_uplink_preview,
                 "profile_count": len(self._profile_presets),
                 "profiles": [dict(profile) for profile in self._profile_presets],
+                "lcd_settings": dict(self._lcd_settings),
+                "profile_dataset": {
+                    "schema_version": int(lcd_dataset["schema_version"]),
+                    "settings": dict(lcd_dataset["settings"]),
+                    "profiles": [dict(profile) for profile in lcd_dataset["profiles"]],
+                },
             }
 
 

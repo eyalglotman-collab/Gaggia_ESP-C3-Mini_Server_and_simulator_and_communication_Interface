@@ -1102,6 +1102,7 @@
             <button id="navLowLevelLog" type="button" class="secondary">WiFi Controller low-level LOG</button>
             <button id="navDelayPlot" type="button" class="secondary">SERVER/CLIENT DELAY</button>
             <button id="navDataSimulation" type="button" class="secondary">SIMULATE DATA</button>
+            <button id="navLcdProfiles" type="button" class="secondary">LCD PROFILE DATA</button>
             <button id="navLcdHome" type="button" class="secondary">LCD HOME PAGE</button>
           </div>
         </div>
@@ -1477,10 +1478,36 @@
           </div>
         </section>
 
-        <section id="windowLcdHome" class="window-shell">
+        <section id="windowLcdProfiles" class="window-shell">
           <div class="window-bar">
             <div>
               <div class="eyebrow">Screen 7</div>
+              <h2 class="window-title">LCD PROFILE STRUCT VIEWER</h2>
+            </div>
+            <div class="status-inline">
+              <div class="status-chip ok">Tree Snapshot Refresh 1s</div>
+            </div>
+          </div>
+          <div class="window-content">
+            <div class="simulation-layout">
+              <section class="panel stack">
+                <div class="section-header">
+                  <div>
+                    <div class="section-kicker">Struct Hierarchy</div>
+                    <h3 class="section-title">Settings + Profile Presets Tree</h3>
+                    <p class="section-copy">This viewer mirrors the LCD profile dataset struct hierarchy: dataset, settings, profiles, and profile stages.</p>
+                  </div>
+                </div>
+                <div id="lcdProfileStructTree" class="telemetry-table"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="windowLcdHome" class="window-shell">
+          <div class="window-bar">
+            <div>
+              <div class="eyebrow">Screen 8</div>
               <h2 class="window-title">LCD HOME PAGE (BREW)</h2>
             </div>
             <div class="status-inline">
@@ -1581,6 +1608,7 @@
       navLowLevelLog: document.getElementById('navLowLevelLog'),
       navDelayPlot: document.getElementById('navDelayPlot'),
       navDataSimulation: document.getElementById('navDataSimulation'),
+      navLcdProfiles: document.getElementById('navLcdProfiles'),
       navLcdHome: document.getElementById('navLcdHome'),
       zeroMaxDelayButton: document.getElementById('zeroMaxDelayButton'),
       totalErrorsButton: document.getElementById('totalErrorsButton'),
@@ -1591,6 +1619,7 @@
       windowLowLevelLog: document.getElementById('windowLowLevelLog'),
       windowDelayPlot: document.getElementById('windowDelayPlot'),
       windowDataSimulation: document.getElementById('windowDataSimulation'),
+      windowLcdProfiles: document.getElementById('windowLcdProfiles'),
       windowLcdHome: document.getElementById('windowLcdHome'),
       workspace: document.querySelector('.workspace'),
       states: document.getElementById('states'),
@@ -1619,6 +1648,7 @@
       simStreamPlotCanvas: document.getElementById('simStreamPlotCanvas'),
       simStreamLatestLabel: document.getElementById('simStreamLatestLabel'),
       simulationDataGrid: document.getElementById('simulationDataGrid'),
+      lcdProfileStructTree: document.getElementById('lcdProfileStructTree'),
       lcdProfileIdInput: document.getElementById('lcdProfileIdInput'),
       lcdProfileNameInput: document.getElementById('lcdProfileNameInput'),
       lcdTemperatureInput: document.getElementById('lcdTemperatureInput'),
@@ -2045,6 +2075,7 @@
       elements.navLowLevelLog.classList.toggle('secondary', mode !== 'low-level-log');
       elements.navDelayPlot.classList.toggle('secondary', mode !== 'delay-plot');
       elements.navDataSimulation.classList.toggle('secondary', mode !== 'data-simulation');
+      elements.navLcdProfiles.classList.toggle('secondary', mode !== 'lcd-profiles');
       elements.navLcdHome.classList.toggle('secondary', mode !== 'lcd-home');
     }
 
@@ -2085,6 +2116,7 @@
       elements.windowLowLevelLog.classList.toggle('active-window', name === 'low-level-log');
       elements.windowDelayPlot.classList.toggle('active-window', name === 'delay-plot');
       elements.windowDataSimulation.classList.toggle('active-window', name === 'data-simulation');
+      elements.windowLcdProfiles.classList.toggle('active-window', name === 'lcd-profiles');
       elements.windowLcdHome.classList.toggle('active-window', name === 'lcd-home');
       setNavMode(name);
 
@@ -2101,7 +2133,9 @@
                   ? elements.windowDelayPlot
                   : name === 'data-simulation'
                     ? elements.windowDataSimulation
-                    : elements.windowLcdHome;
+                    : name === 'lcd-profiles'
+                      ? elements.windowLcdProfiles
+                      : elements.windowLcdHome;
       scrollGroupToTop(target);
     }
 
@@ -2480,6 +2514,57 @@
       });
     }
 
+    function treeScalarText(value) {
+      if (typeof value === 'boolean') return value ? 'true' : 'false';
+      if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NaN';
+      if (value === null || value === undefined) return 'null';
+      return String(value);
+    }
+
+    function flattenTreeRows(node, pathLabel, depth, rows) {
+      if (Array.isArray(node)) {
+        rows.push({ depth, key: pathLabel, value: `[${node.length}]` });
+        node.forEach((child, index) => {
+          flattenTreeRows(child, `[${index}]`, depth + 1, rows);
+        });
+        return;
+      }
+
+      if (node && typeof node === 'object') {
+        rows.push({ depth, key: pathLabel, value: '{...}' });
+        Object.entries(node).forEach(([key, value]) => {
+          flattenTreeRows(value, key, depth + 1, rows);
+        });
+        return;
+      }
+
+      rows.push({ depth, key: pathLabel, value: treeScalarText(node) });
+    }
+
+    function renderLcdProfileDataset(snapshot) {
+      const container = elements.lcdProfileStructTree;
+      if (!container) return;
+      container.innerHTML = '';
+
+      const dataset = snapshot?.profile_dataset;
+      if (!dataset || typeof dataset !== 'object') {
+        const emptyRow = document.createElement('div');
+        emptyRow.className = 'telemetry-row';
+        emptyRow.innerHTML = '<div class="telemetry-cell-name">dataset</div><div class="telemetry-cell-value">No dataset available.</div>';
+        container.appendChild(emptyRow);
+        return;
+      }
+
+      const rows = [];
+      flattenTreeRows(dataset, 'dataset', 0, rows);
+      rows.forEach(({ depth, key, value }) => {
+        const row = document.createElement('div');
+        row.className = 'telemetry-row';
+        row.innerHTML = `<div class="telemetry-cell-name" style="padding-left:${depth * 14}px">${key}</div><div class="telemetry-cell-value">${value}</div>`;
+        container.appendChild(row);
+      });
+    }
+
     function isSimulationEnabled(snapshot) {
       const importantData = snapshot?.important_data || {};
       const stateText = String(importantData['Data Simulation'] || '').trim().toLowerCase();
@@ -2771,6 +2856,7 @@
       renderTotalErrors(snapshot);
       renderDelayPlot(snapshot);
       renderSimulationData(snapshot);
+      renderLcdProfileDataset(snapshot);
       renderLcdHome(snapshot);
 
       if (Array.isArray(snapshot.logs)) {
@@ -2898,6 +2984,7 @@
     elements.navLowLevelLog.addEventListener('click', () => activateWindow('low-level-log'));
     elements.navDelayPlot.addEventListener('click', () => activateWindow('delay-plot'));
     elements.navDataSimulation.addEventListener('click', () => activateWindow('data-simulation'));
+    elements.navLcdProfiles.addEventListener('click', () => activateWindow('lcd-profiles'));
     elements.navLcdHome.addEventListener('click', () => activateWindow('lcd-home'));
     elements.openButton.addEventListener('click', () => post('/api/transport/open', { port_name: elements.serialPort.value.trim() || 'COM4' }, elements.openButton));
     elements.closeButton.addEventListener('click', () => post('/api/transport/close', null, elements.closeButton));

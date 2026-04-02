@@ -123,6 +123,7 @@ class LinkSnapshot:
     last_error: str
     important_data: dict[str, str]
     telemetry_data: dict[str, str]
+    profile_dataset: dict[str, object]
     transport: dict[str, object]
     logs: list[str]
     low_level_logs: list[str]
@@ -198,6 +199,7 @@ class LinkRuntime:
         self._lcd_protocol_bridge.initialize_hooks(
             send_payload_callback=self._send_lcd_protocol_payload_locked,
             profile_provider_callback=self._get_lcd_protocol_profiles,
+            dataset_provider_callback=self._get_lcd_protocol_dataset,
         )
         self._append_log("Transport runtime ready. Default TopLayer state is reset.")
 
@@ -733,6 +735,11 @@ class LinkRuntime:
         if not isinstance(profile_presets, list):
             return []
         return build_profile_summaries_from_presets(profile_presets)
+
+    def _get_lcd_protocol_dataset(self) -> dict[str, object]:
+        """@brief Return full settings+profiles dataset for protocol bootstrap."""
+
+        return data_payload_manager.get_lcd_profile_dataset()
 
     def _handle_client_data_command_locked(self, payload_text: str) -> None:
         """@brief Apply client DATA text commands to simulator data generation.
@@ -1785,6 +1792,7 @@ class LinkRuntime:
             last_error=self._last_error or transport_snapshot.last_error,
             important_data=important_data,
             telemetry_data=telemetry_data,
+            profile_dataset=data_payload_manager.get_lcd_profile_dataset(),
             transport=asdict(transport_snapshot),
             logs=self._combined_logs_locked() if include_logs else [],
             low_level_logs=serial_link_manager.get_logs()[:2000] if include_logs else [],

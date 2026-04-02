@@ -7,13 +7,16 @@ from typing import Callable
 from server.communication.data_structures_lcd_controller import (
     LCD_CONTROLLER_BREW_SCHEMA_NAME,
     LCDControllerProfileSummary,
+    encode_lcd_dataset_payload,
 )
 
 LCD_PROTOCOL_CMD_INIT: str = "lcdprotoinit"
 LCD_PROTOCOL_CMD_PROFILE_CATALOG_GET: str = "lcdprotoprofilecatalogget"
+LCD_PROTOCOL_CMD_PROFILE_DATASET_GET: str = "lcdprotoprofiledatasetget"
 
 LCD_PROTOCOL_ACK_PREFIX: str = "LCDProtoAck"
 LCD_PROTOCOL_PROFILE_CATALOG_PREFIX: str = "LCDProtoProfileCatalog"
+LCD_PROTOCOL_PROFILE_DATASET_PREFIX: str = "LCDProtoProfileDataset"
 
 
 class LCDControllerProtocolBridge:
@@ -23,16 +26,19 @@ class LCDControllerProtocolBridge:
         self._initialized: bool = False
         self._send_payload_callback: Callable[[str], None] | None = None
         self._profile_provider_callback: Callable[[], list[LCDControllerProfileSummary]] | None = None
+        self._dataset_provider_callback: Callable[[], dict[str, object]] | None = None
 
     def initialize_hooks(
         self,
         send_payload_callback: Callable[[str], None],
         profile_provider_callback: Callable[[], list[LCDControllerProfileSummary]],
+        dataset_provider_callback: Callable[[], dict[str, object]],
     ) -> None:
         """@brief Register command-send and profile-provider hooks for runtime use."""
 
         self._send_payload_callback = send_payload_callback
         self._profile_provider_callback = profile_provider_callback
+        self._dataset_provider_callback = dataset_provider_callback
         self._initialized = True
 
     def is_initialized(self) -> bool:
@@ -52,7 +58,12 @@ class LCDControllerProtocolBridge:
 
         if normalized.startswith(LCD_PROTOCOL_CMD_INIT):
             self._emit_init_ack()
+            self._emit_profile_dataset()
             self._emit_profile_catalog()
+            return True
+
+        if normalized.startswith(LCD_PROTOCOL_CMD_PROFILE_DATASET_GET):
+            self._emit_profile_dataset()
             return True
 
         if normalized.startswith(LCD_PROTOCOL_CMD_PROFILE_CATALOG_GET):
@@ -75,6 +86,13 @@ class LCDControllerProtocolBridge:
             return []
         return self._profile_provider_callback()
 
+    def _dataset(self) -> dict[str, object]:
+        """@brief Read latest full LCD profile dataset from provider callback."""
+
+        if self._dataset_provider_callback is None:
+            return {}
+        return self._dataset_provider_callback()
+
     def _emit_init_ack(self) -> None:
         """@brief Send protocol ACK with schema and profile-count metadata."""
 
@@ -94,4 +112,14 @@ class LCDControllerProtocolBridge:
             f"{LCD_PROTOCOL_PROFILE_CATALOG_PREFIX};count={len(profiles)};"
             f"items={items}"
         )
+        self._emit_payload(payload)
+
+    def _emit_profile_dataset(self) -> None:
+        """@brief Send full profile dataset payload for client-side TF persistence."""
+
+        dataset = self._dataset()
+        if not dataset:
+            payload = f"{LCD_PROTOCOL_PROFILE_DATASET_PREFIX};schema=0;count=0;settings=;profiles="
+        else:
+            payload = encode_lcd_dataset_payload(dataset)
         self._emit_payload(payload)
