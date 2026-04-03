@@ -2,11 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.3.7\par
+- Version: 0.3.8\par
 - Bridge Firmware Version: 0.1.25\par
-- Summary: Added profile-specific brew timelines with realistic pressure/flow/temperature curves, disabled non-brew continuous weight traffic, and formalized monitor/version governance rules in README.\par
+- Summary: Hardened bridge flash wrapper invocation by routing `idfw.cmd` through `idfw.ps1` and enforcing explicit Python/`idf.py` path validation with improved debug diagnostics.\par
 \par
 \b X=0, Y=3\b0\par
+\b 2026-04-03 18:20:00\b0\par
+- Version: 0.3.8\par
+- Firmware Version: 0.1.25\par
+- Summary: Stabilized ESP-IDF wrapper execution and diagnostics for bridge build/flash operations.\par
+- Notes: `scripts/idfw.cmd` now delegates directly to `scripts/idfw.ps1` so all build/flash/monitor operations use one strict wrapper path. `scripts/idfw.ps1` now resolves and validates explicit Python environment and `idf.py` script paths, invokes `idf.py` through the validated interpreter path, and adds optional `IDFW_DEBUG` diagnostics plus guarded exception reporting. Existing COM release behavior before/after IDF actions remains enforced.\par
+\par
 \b 2026-04-01 16:53:00\b0\par
 - Version: 0.3.7\par
 - Firmware Version: 0.1.25\par

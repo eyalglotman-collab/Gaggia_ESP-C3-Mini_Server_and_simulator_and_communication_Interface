@@ -51,6 +51,19 @@ $env:ESPPORT = $SelectedPort
 
 . (Join-Path $PSScriptRoot "setup_idf_env.ps1") -DefaultPort $SelectedPort
 
+$IdfPath = if ($env:IDF_PATH) { $env:IDF_PATH } else { "C:\Espressif\.espressif\v5.5.2\esp-idf" }
+$PythonEnvPath = if ($env:IDF_PYTHON_ENV_PATH) { $env:IDF_PYTHON_ENV_PATH } else { "C:\Espressif\python_env\idf5.5_py3.11_env" }
+$PythonExe = Join-Path $PythonEnvPath "Scripts\python.exe"
+$IdfPyScript = Join-Path $IdfPath "tools\idf.py"
+
+if (-not (Test-Path $PythonExe)) {
+    throw "ESP-IDF Python executable not found at '$PythonExe'."
+}
+
+if (-not (Test-Path $IdfPyScript)) {
+    throw "idf.py not found at '$IdfPyScript'."
+}
+
 $EffectiveArgs = @("-C", $FirmwareRoot)
 if (-not ($IdfArgs -contains "-B")) {
     $EffectiveArgs += @("-B", $BuildDir)
@@ -63,6 +76,7 @@ $EffectiveArgs += $IdfArgs
 
 $needsComRelease = ($IdfArgs.Count -eq 0) -or ($IdfArgs -contains 'build') -or ($IdfArgs -contains 'flash') -or ($IdfArgs -contains 'monitor')
 $exitCode = 1
+$invokeException = $null
 
 try {
     if ($needsComRelease) {
@@ -70,13 +84,31 @@ try {
         Invoke-SimulatorComRelease
     }
 
-    idf.py @EffectiveArgs
-    $exitCode = $LASTEXITCODE
+    if ($env:IDFW_DEBUG -eq "1") {
+        Write-Host ("IDFW_DEBUG: python={0}" -f $PythonExe)
+        Write-Host ("IDFW_DEBUG: idf.py={0}" -f $IdfPyScript)
+        Write-Host ("IDFW_DEBUG: args={0}" -f ($EffectiveArgs -join ' '))
+    }
+
+    & $PythonExe $IdfPyScript @EffectiveArgs
+    if ($null -eq $LASTEXITCODE) {
+        $exitCode = 1
+    } else {
+        $exitCode = $LASTEXITCODE
+    }
+} catch {
+    $invokeException = $_
+    Write-Error ("idfw.ps1 failed to execute idf.py: {0}" -f $_.Exception.Message)
+    $exitCode = 1
 } finally {
     if ($needsComRelease) {
         Write-Host "Releasing COM port after idf action..."
         Invoke-SimulatorComRelease
     }
+}
+
+if ($invokeException -and $env:IDFW_DEBUG -eq "1") {
+    Write-Error ("IDFW_DEBUG: stack={0}" -f $invokeException.ScriptStackTrace)
 }
 
 exit $exitCode
