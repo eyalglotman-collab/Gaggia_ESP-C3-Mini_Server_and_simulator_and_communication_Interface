@@ -23,6 +23,10 @@ $ErrorActionPreference = "Stop"
 # @details POSTs to the simulator HTTP API to force-release the serial link.
 # All errors are suppressed so the command proceeds even when the sim is not running.
 function Invoke-SimulatorComRelease {
+    if ($env:IDFW_USE_SIM_RELEASE -ne "1") {
+        return
+    }
+
     try {
         Invoke-WebRequest -Uri 'http://localhost:8000/api/transport/release-com' `
             -Method Post -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
@@ -35,10 +39,33 @@ $FirmwareRoot = Join-Path $RepoRoot "firmware\esp32c3_bridge"
 $BuildDir = Join-Path $RepoRoot ".idfbuild\esp32c3_bridge"
 $DefaultPort = "COM4"
 
+$NormalizedIdfArgs = @()
+$HasBuild = $false
+$HasFlash = $false
+foreach ($arg in $IdfArgs) {
+    if ($arg -ieq "flash-only") {
+        $NormalizedIdfArgs += "flash"
+        $HasFlash = $true
+        continue
+    }
+
+    $NormalizedIdfArgs += $arg
+    if ($arg -ieq "build") {
+        $HasBuild = $true
+    }
+    if ($arg -ieq "flash") {
+        $HasFlash = $true
+    }
+}
+
+if ($HasFlash -and -not $HasBuild) {
+    Write-Host "Flash-only mode requested (no build step)."
+}
+
 $SelectedPort = $null
-for ($i = 0; $i -lt $IdfArgs.Count; $i++) {
-    if ($IdfArgs[$i] -eq '-p' -and ($i + 1) -lt $IdfArgs.Count) {
-        $SelectedPort = $IdfArgs[$i + 1]
+for ($i = 0; $i -lt $NormalizedIdfArgs.Count; $i++) {
+    if ($NormalizedIdfArgs[$i] -eq '-p' -and ($i + 1) -lt $NormalizedIdfArgs.Count) {
+        $SelectedPort = $NormalizedIdfArgs[$i + 1]
         break
     }
 }
@@ -65,16 +92,16 @@ if (-not (Test-Path $IdfPyScript)) {
 }
 
 $EffectiveArgs = @("-C", $FirmwareRoot)
-if (-not ($IdfArgs -contains "-B")) {
+if (-not ($NormalizedIdfArgs -contains "-B")) {
     $EffectiveArgs += @("-B", $BuildDir)
 }
-if (-not ($IdfArgs -contains "-DIDF_TARGET=esp32c3")) {
+if (-not ($NormalizedIdfArgs -contains "-DIDF_TARGET=esp32c3")) {
     $EffectiveArgs += "-DIDF_TARGET=esp32c3"
 }
 
-$EffectiveArgs += $IdfArgs
+$EffectiveArgs += $NormalizedIdfArgs
 
-$needsComRelease = ($IdfArgs.Count -eq 0) -or ($IdfArgs -contains 'build') -or ($IdfArgs -contains 'flash') -or ($IdfArgs -contains 'monitor')
+$needsComRelease = ($NormalizedIdfArgs.Count -eq 0) -or ($NormalizedIdfArgs -contains 'build') -or ($NormalizedIdfArgs -contains 'flash') -or ($NormalizedIdfArgs -contains 'monitor')
 $exitCode = 1
 $invokeException = $null
 
@@ -90,11 +117,20 @@ try {
         Write-Host ("IDFW_DEBUG: args={0}" -f ($EffectiveArgs -join ' '))
     }
 
-    & $PythonExe $IdfPyScript @EffectiveArgs
-    if ($null -eq $LASTEXITCODE) {
+    # Launch idf.py through Start-Process to avoid shell-specific cases where
+    # external command invocation does not propagate a reliable LASTEXITCODE.
+    $pythonArgs = @($IdfPyScript) + $EffectiveArgs
+    $idfProcess = Start-Process -FilePath $PythonExe `
+        -ArgumentList $pythonArgs `
+        -WorkingDirectory $RepoRoot `
+        -NoNewWindow `
+        -Wait `
+        -PassThru
+
+    if ($null -eq $idfProcess -or $null -eq $idfProcess.ExitCode) {
         $exitCode = 1
     } else {
-        $exitCode = $LASTEXITCODE
+        $exitCode = [int]$idfProcess.ExitCode
     }
 } catch {
     $invokeException = $_

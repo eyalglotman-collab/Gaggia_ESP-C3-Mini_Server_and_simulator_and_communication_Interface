@@ -2,11 +2,17 @@
 {\fonttbl{\f0 Consolas;}{\f1 Arial;}}
 \f1\fs24
 \b Latest Version Feature List\b0\par
-- Version: 0.3.8\par
+- Version: 0.3.9\par
 - Bridge Firmware Version: 0.1.25\par
-- Summary: Hardened bridge flash wrapper invocation by routing `idfw.cmd` through `idfw.ps1` and enforcing explicit Python/`idf.py` path validation with improved debug diagnostics.\par
+- Summary: Hardened simulator COM-open recovery and bridge-session error handling, and expanded wrapper/test coverage for flash-only and runtime reconnect edge cases.\par
 \par
 \b X=0, Y=3\b0\par
+\b 2026-04-03 22:40:00\b0\par
+- Version: 0.3.9\par
+- Firmware Version: 0.1.25\par
+- Summary: Added robust COM-open force-release recovery, safe bridge-error state handling, and flash-only wrapper normalization with targeted regression tests.\par
+- Notes: `server/sim/link_state_machine.py` now force-releases likely COM holders on access-denied style open failures, handles `realtime_data_halted;reason=tcp_client_closed` as a non-fatal reconnect transition to `connect`, and skips delayed `shot_done_success` forwarding when keepalive/TCP session state is no longer active. `scripts/idfw.ps1` now normalizes `flash-only` to `flash`, emits explicit flash-only intent, and executes `idf.py` through a tracked `Start-Process` path for reliable exit-code handling; simulator COM release is gated behind `IDFW_USE_SIM_RELEASE=1`. `tests/test_simulator_api.py` now adds regression coverage for forced-release open retries, bridge TCP-closed error transitions, and shot-done gating outside active keepalive sessions. `README.md` now documents explicit `flash` versus `build flash` selection rules.\par
+\par
 \b 2026-04-03 18:20:00\b0\par
 - Version: 0.3.8\par
 - Firmware Version: 0.1.25\par

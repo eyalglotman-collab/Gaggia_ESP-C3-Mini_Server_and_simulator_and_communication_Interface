@@ -169,15 +169,18 @@ The repository also contains related helper scripts:
 
 ### Bridge Firmware Build and Flash
 
-This is the ONLY approved bridge flash method:
+These are the ONLY approved bridge flash methods:
 
 ```bash
+cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> flash
 cmd.exe /c C:/Espressif/Eyal_Projects_ESP32_S3/Eyal_espresso_server_simulator/scripts/idfw.cmd -p <PORT> build flash
 ```
 
 Mandatory rules:
 
-- Use exactly the command above for every bridge flash task.
+- Use exactly one of the commands above for every bridge flash task.
+- Use `flash` (or `flash-only`) when firmware/configuration did not change and existing artifacts are valid.
+- Use `build flash` when bridge firmware sources/configuration changed, or when build artifacts are missing/stale.
 - Do not split flashing into separate commands.
 - Do not use `scripts/flash_hidden.ps1`.
 - Do not use `scripts/idfw.ps1`.
@@ -190,7 +193,7 @@ For every verification/build/flash task, Codex/Claude must use this exact gated 
 
 1. Gate 1: quick compliance check of `AGENTS.md`, `README.md`, and `CLAUDE.md`.
 2. Gate 2: run `scripts/start_wait_sound.ps1`.
-3. Gate 3: execute the single approved flash command above (no alternatives and no parallel flashing).
+3. Gate 3: execute one approved flash command above that matches the requested scope (`flash` or `build flash`), no alternatives and no parallel flashing.
 4. Gate 4: run `scripts/stop_wait_sound.ps1`.
 5. Gate 5: on successful completion, run `scripts/play_build_success_sound.ps1`.
 
@@ -217,7 +220,7 @@ If any gate fails, the sequence is non-compliant and execution must stop immedia
 
 ### Flash Enforcement Note
 
-If flashing fails, retry using the same approved command only. Do not switch to an alternative flash path.
+If flashing fails, retry using the same approved command family only. If `flash` fails due stale/missing artifacts, retry with `build flash`.
 
 ## Current Architectural Intent
 

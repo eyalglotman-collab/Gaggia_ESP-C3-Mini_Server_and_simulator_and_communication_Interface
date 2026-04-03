@@ -39,6 +39,13 @@ SERIAL_OPEN_TRANSIENT_ERROR_TOKENS = (
     "permission denied",
     "clearcommerror failed",
 )
+SERIAL_OPEN_FORCE_RELEASE_ERROR_TOKENS = (
+    "semaphore timeout",
+    "cannot configure port",
+    "access is denied",
+    "permission denied",
+    "resource busy",
+)
 
 
 class LinkState(StrEnum):
@@ -581,6 +588,20 @@ class LinkRuntime:
             return False
         return any(token in normalized for token in SERIAL_OPEN_TRANSIENT_ERROR_TOKENS)
 
+    @staticmethod
+    def _should_force_release_on_open_error(error_text: str) -> bool:
+        """@brief Return whether a COM open fault should trigger hard release.
+
+        @details Some Windows COM failures (for example access denied) are
+        caused by stale external holders. Force-release before retry helps the
+        simulator recover without manual process cleanup.
+        """
+
+        normalized = (error_text or "").strip().lower()
+        if not normalized:
+            return False
+        return any(token in normalized for token in SERIAL_OPEN_FORCE_RELEASE_ERROR_TOKENS)
+
     def _open_transport_with_retry(self, target_port: str) -> tuple[int, str]:
         """@brief Open transport with bounded retry for transient COM faults.
 
@@ -601,12 +622,29 @@ class LinkRuntime:
             except RuntimeError as exc:
                 last_error = str(exc).strip() or "generic unknown failure"
                 transient = self._is_transient_serial_open_error(last_error)
+                released_pids: list[int] | None = None
+                release_error = ""
+                if transient and attempt < SERIAL_OPEN_RETRY_LIMIT:
+                    if self._should_force_release_on_open_error(last_error):
+                        try:
+                            _, released_pids = serial_link_manager.force_release_port()
+                        except Exception as release_exc:
+                            release_error = str(release_exc).strip() or "generic unknown failure"
                 with self._lock:
                     if transient and attempt < SERIAL_OPEN_RETRY_LIMIT:
                         self._append_log(
                             f"Open {target_port} attempt {attempt}/{SERIAL_OPEN_RETRY_LIMIT} failed "
                             f"({last_error}); retrying."
                         )
+                        if released_pids is not None:
+                            detail = ", ".join(str(pid) for pid in released_pids) if released_pids else "none"
+                            self._append_log(
+                                f"Open {target_port} retry pre-step force-released COM holders: {detail}."
+                            )
+                        elif release_error:
+                            self._append_log(
+                                f"Open {target_port} retry pre-step COM force-release failed ({release_error})."
+                            )
                     else:
                         self._append_log(
                             f"Open {target_port} attempt {attempt}/{SERIAL_OPEN_RETRY_LIMIT} failed ({last_error})."
@@ -657,6 +695,53 @@ class LinkRuntime:
                 except ValueError:
                     return None
         return None
+
+    @staticmethod
+    def _try_parse_text_payload_value(payload_text: str, key_text: str) -> str | None:
+        """@brief Parse one free-text value from a semicolon payload."""
+
+        key_prefix = f"{key_text}="
+        for token in payload_text.split(";"):
+            token = token.strip()
+            if not token.startswith(key_prefix):
+                continue
+            value_text = token[len(key_prefix):].strip()
+            if value_text:
+                return value_text
+        return None
+
+    def _handle_bridge_error_frame_locked(self, payload_text: str) -> bool:
+        """@brief Handle known bridge-side error payloads non-fatally.
+
+        @details Some bridge error payloads are informational state reports
+        (for example client TCP closure) rather than protocol corruption.
+        Handling them explicitly keeps the host runtime synchronized and avoids
+        follow-up sends on stale sessions.
+
+        @return ``True`` when the payload was handled.
+        """
+
+        if not payload_text:
+            return False
+
+        if payload_text.startswith("realtime_data_halted"):
+            halt_reason = self._try_parse_text_payload_value(payload_text, "reason") or "unknown"
+            self._append_log(f"Bridge realtime-data stream halted ({halt_reason}).")
+            if halt_reason == "tcp_client_closed":
+                self._watchdog_armed = False
+                self._running_integer_seeded = False
+                self._last_running_integer_rx_at = None
+                self._tcp_connected = False
+                self._connect_completed = False
+                self._shot_done_pending = False
+                self._shot_done_due_monotonic = 0.0
+                self._set_state(
+                    LinkState.CONNECT,
+                    "Bridge reported TCP client closed; waiting for client reconnect.",
+                )
+            return True
+
+        return False
 
     @staticmethod
     def _classify_keepalive_direction(payload_text: str) -> str:
@@ -863,6 +948,8 @@ class LinkRuntime:
                         LinkState.INITIALIZE,
                         "Bridge keepalive retries exhausted. Bridge returned to initialize wait.",
                     )
+                    continue
+                if self._handle_bridge_error_frame_locked(payload_text):
                     continue
                 self._append_log(f"Bridge reported error frame: {payload_text or 'generic unknown failure'}")
                 continue
@@ -1633,6 +1720,11 @@ class LinkRuntime:
             and not brew_active
             and now_monotonic >= self._shot_done_due_monotonic
             and transport_snapshot.port_open
+            and self._tcp_connected
+            and self._current_state in (
+                LinkState.KEEPALIVE_SERVER_SEND,
+                LinkState.KEEPALIVE_CLIENT_RETURN,
+            )
         ):
             try:
                 self._send_command_locked(MessageType.DATA, "shot_done_success")
@@ -1643,6 +1735,16 @@ class LinkRuntime:
                 self._shot_done_due_monotonic = 0.0
             except RuntimeError as exc:
                 self._append_log(f"shot_done_success event could not be forwarded to client: {exc}")
+        elif (
+            self._shot_done_pending
+            and not brew_active
+            and now_monotonic >= self._shot_done_due_monotonic
+        ):
+            self._shot_done_pending = False
+            self._shot_done_due_monotonic = 0.0
+            self._append_log(
+                "Skipped shot_done_success because keepalive session is no longer active."
+            )
         self._last_brew_active = brew_active
         esp32c3_connected = bool(transport_snapshot.port_open and self._bridge_ready)
         if not transport_snapshot.port_open:

@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from time import monotonic
 
 from ServerInterface.frame_codec import Frame
 from ServerInterface.frame_codec import FrameDecodeError
@@ -189,6 +190,32 @@ def test_link_snapshot_stays_available_if_open_fails(monkeypatch) -> None:
     assert snapshot_response.status_code == 200
     payload = snapshot_response.json()
     assert payload['last_error'].startswith('COM open failed on COM4:')
+
+
+def test_open_transport_retry_force_releases_on_access_denied(monkeypatch) -> None:
+    client = TestClient(app)
+    attempts = {'open': 0, 'release': 0}
+
+    def fake_open_port() -> None:
+        attempts['open'] += 1
+        raise RuntimeError("could not open port 'COM4': PermissionError(13, 'Access is denied.', None, 5)")
+
+    def fake_force_release_port() -> tuple[SerialLinkSnapshot, list[int]]:
+        attempts['release'] += 1
+        return _open_transport_snapshot(), []
+
+    monkeypatch.setattr(serial_link_manager, 'open_port', fake_open_port)
+    monkeypatch.setattr(serial_link_manager, 'force_release_port', fake_force_release_port)
+
+    response = client.post('/api/transport/open', json={'port_name': 'COM4'})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert attempts['open'] > 0
+    assert attempts['release'] > 0
+    assert payload['current_state'] == 'error'
+    assert payload['last_error'].startswith('COM open failed on COM4:')
+    assert any('force-released com holders' in line.lower() for line in payload['logs'])
 
 
 def test_all_api_routes_return_snapshots(monkeypatch) -> None:
@@ -430,6 +457,46 @@ def test_explicit_client_connected_promotes_runtime_to_keepalive(monkeypatch) ->
     assert payload['important_data']['TCP Connected'] == 'Yes'
 
 
+def test_tcp_client_closed_bridge_error_returns_runtime_to_connect(monkeypatch) -> None:
+    client = TestClient(app)
+
+    _reset_runtime_for_test()
+
+    rx_batches = [[
+        Frame(
+            message_type=MessageType.ERROR,
+            host_live_integer=10,
+            device_live_integer=9,
+            sequence=40,
+            payload=b'realtime_data_halted;reason=tcp_client_closed;sid=9',
+        )
+    ]]
+
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(
+        serial_link_manager,
+        'pop_received_frames',
+        lambda: rx_batches.pop(0) if rx_batches else [],
+    )
+
+    with link_runtime._lock:  # noqa: SLF001 - controlled state setup for bridge error regression
+        link_runtime._current_state = LinkState.KEEPALIVE_SERVER_SEND  # noqa: SLF001
+        link_runtime._initialize_completed = True  # noqa: SLF001
+        link_runtime._connect_completed = True  # noqa: SLF001
+        link_runtime._wifi_connected = True  # noqa: SLF001
+        link_runtime._tcp_connected = True  # noqa: SLF001
+        link_runtime._watchdog_armed = True  # noqa: SLF001
+
+    response = client.get('/api/link')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['current_state'] == 'connect'
+    assert payload['important_data']['TCP Connected'] == 'No'
+    assert payload['important_data']['Connect Passed'] == 'No'
+    assert any('tcp client closed' in line.lower() for line in payload['logs'])
+
+
 def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
     client = TestClient(app)
 
@@ -446,6 +513,38 @@ def test_send_data_stays_blocked_until_keepalive_ready(monkeypatch) -> None:
     assert payload['current_state'] == 'reset'
     assert payload['last_error'] in ('', 'No error')
     assert any('send data ignored because keepalive-ready connection is not available yet'.lower() in line.lower() for line in payload['logs'])
+
+
+def test_shot_done_success_is_skipped_when_keepalive_not_active(monkeypatch) -> None:
+    client = TestClient(app)
+    sent_payloads: list[bytes] = []
+
+    _reset_runtime_for_test()
+
+    def capture_frame(frame: Frame) -> SerialLinkSnapshot:
+        sent_payloads.append(frame.payload)
+        return _open_transport_snapshot()
+
+    monkeypatch.setattr(serial_link_manager, 'send_frame', capture_frame)
+    monkeypatch.setattr(serial_link_manager, 'get_snapshot', _open_transport_snapshot)
+    monkeypatch.setattr(serial_link_manager, 'pop_received_frames', lambda: [])
+
+    with link_runtime._lock:  # noqa: SLF001 - controlled state setup for shot-done gating regression
+        link_runtime._current_state = LinkState.CONNECT  # noqa: SLF001
+        link_runtime._initialize_completed = True  # noqa: SLF001
+        link_runtime._connect_completed = False  # noqa: SLF001
+        link_runtime._wifi_connected = True  # noqa: SLF001
+        link_runtime._tcp_connected = False  # noqa: SLF001
+        link_runtime._shot_done_pending = True  # noqa: SLF001
+        link_runtime._shot_done_due_monotonic = monotonic() - 0.1  # noqa: SLF001
+        link_runtime._last_brew_active = False  # noqa: SLF001
+
+    response = client.get('/api/link')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert b'shot_done_success' not in sent_payloads
+    assert any('skipped shot_done_success' in line.lower() for line in payload['logs'])
 
 
 def test_keepalive_is_rejected_until_initialize_and_connect_pass(monkeypatch) -> None:
